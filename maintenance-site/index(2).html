@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>نظام صيانة الورشة المركزية</title>
+<script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.7/babel.min.js"></script>
+<style>
+  :root{
+    --bg:#1B1E20; --surface:#24282B; --surface-2:#2E3336; --border:#3A4044;
+    --text:#E7EAEC; --muted:#9AA3A8; --accent:#E9822D; --ok:#4CAF7D; --err:#F2867B;
+  }
+  * { box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:var(--bg); color:var(--text); min-height:100vh; font-family:-apple-system,Segoe UI,Tahoma,Arial,sans-serif; }
+  #root{ min-height:100vh; }
+  button{ font-family:inherit; cursor:pointer; }
+  input,select,textarea{ font-family:inherit; }
+  .app{ max-width:1100px; margin:0 auto; padding:16px; }
+  .login-wrap{ max-width:420px; margin:40px auto; text-align:center; padding:24px; }
+  .logo{ font-size:40px; margin-bottom:8px; }
+  .login-form{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; text-align:right; }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
+  .field input, .field select{ width:100%; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); }
+  .btn{ background:var(--accent); color:#1B1E20; font-weight:700; border:none; border-radius:8px; padding:12px; width:100%; }
+  .btn-secondary{ background:var(--surface-2); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:10px 14px; }
+  .btn-danger{ background:var(--err); color:#1B1E20; border:none; border-radius:6px; padding:8px 10px; }
+  .error{ color:var(--err); font-size:13px; margin:8px 0; }
+  .ok-msg{ color:var(--ok); font-size:13px; margin:8px 0; }
+  .topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px; }
+  .tabs{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+  .tab{ background:var(--surface); border:1px solid var(--border); color:var(--muted); padding:8px 14px; border-radius:8px; font-size:14px; }
+  .tab.active{ background:var(--accent); color:#1B1E20; border-color:var(--accent); font-weight:700; }
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:14px; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th,td{ padding:8px; text-align:right; border-bottom:1px solid var(--border); }
+  th{ color:var(--muted); font-weight:600; }
+  .row-actions{ display:flex; gap:6px; }
+  .icon-btn{ background:transparent; border:1px solid var(--border); border-radius:6px; padding:4px 8px; color:var(--text); }
+  .stat{ display:inline-block; background:var(--surface-2); border-radius:8px; padding:12px 16px; margin:4px; min-width:120px; text-align:center; }
+  .stat b{ display:block; font-size:22px; color:var(--accent); }
+  .link-btn{ background:none; border:none; color:var(--accent); text-decoration:underline; font-size:13px; }
+  .modal-bg{ position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; padding:16px; z-index:50; }
+  .modal{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; max-width:480px; width:100%; max-height:85vh; overflow:auto; }
+  .search-box{ margin-bottom:10px; }
+  .search-box input{ width:100%; padding:8px 10px; border-radius:6px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); }
+  .thumb{ width:40px; height:40px; object-fit:cover; border-radius:4px; border:1px solid var(--border); }
+  .hint{ font-size:11px; color:var(--muted); margin-top:4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+function makeIcon(emoji){
+  return function IconComp({ size = 16, style, ...rest }) {
+    return <span style={{ fontSize:size, lineHeight:1, display:"inline-block", ...style }} {...rest}>{emoji}</span>;
+  };
+}
+const IconWrench = makeIcon("🔧");
+const IconDash = makeIcon("📊");
+const IconList = makeIcon("📋");
+const IconBox = makeIcon("📦");
+const IconLogout = makeIcon("🚪");
+const IconPlus = makeIcon("➕");
+const IconX = makeIcon("✕");
+const IconCal = makeIcon("🗓️");
+const IconSearch = makeIcon("🔍");
+const IconSwap = makeIcon("🔁");
+const IconReport = makeIcon("📈");
+const IconCopy = makeIcon("🗒️");
+const IconUsers = makeIcon("👥");
+const IconParts = makeIcon("🔩");
+const IconLog = makeIcon("📝");
+const IconSite = makeIcon("🏭");
+
+const FN = "/.netlify/functions/data";
+
+async function loadList(key){
+  try{
+    const r = await fetch(`${FN}?key=${encodeURIComponent(key)}`);
+    if(!r.ok) return [];
+    const j = await r.json();
+    return Array.isArray(j.value) ? j.value : [];
+  }catch{ return []; }
+}
+async function saveList(key, list){
+  const r = await fetch(FN, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, value: list }),
+  });
+  if(!r.ok){
+    const t = await r.text();
+    throw new Error(t || "فشل الحفظ");
+  }
+  return list;
+}
+
+const ROLE_RANK = { "فني":0, "مسؤول صيانة":1, "مهندس صيانة":2, "مدير الصيانة":3 };
+function rankOf(user){ return ROLE_RANK[user && user.role_name] ?? 0; }
+
+const SECTION_LABELS = { equipment:"معدات", workorders:"أوامر عمل", pmplans:"صيانة وقائية", purchaserequests:"طلبات شراء", transfers:"نقل", spareparts:"قطع غيار", users:"مستخدمون", sites:"محطات" };
+const FAULT_CATEGORIES = [
+  { code:"HYD", label:"هيدروليك" },
+  { code:"MEC", label:"ميكانيكا" },
+  { code:"ELE", label:"كهرباء" },
+  { code:"PNT", label:"دهان" },
+  { code:"BLK", label:"حدادة" },
+  { code:"ENG", label:"مكينة أو جيربوكس" },
+];
+const FAULT_CATEGORY_MAP = Object.fromEntries(FAULT_CATEGORIES.map(f => [f.code, f.label]));
+const FAULT_CATEGORY_OPTION_PAIRS = FAULT_CATEGORIES.map(f => ({ value:f.code, label:`${f.code} (${f.label})` }));
+function renderFaultCategory(code){
+  if(!code) return "—";
+  const label = FAULT_CATEGORY_MAP[code];
+  return label ? (<span>{code} <span style={{ color:"var(--muted)" }}>({label})</span></span>) : code;
+}
+function computeKPI(list){
+  const total = list.length;
+  const completed = list.filter(w => w.status === "مكتمل");
+  const completionRate = total ? Math.round(completed.length/total*100) : 0;
+  const durations = completed
+    .filter(w => w.opened_at && w.closed_at)
+    .map(w => (new Date(w.closed_at) - new Date(w.opened_at)) / 86400000)
+    .filter(d => isFinite(d) && d >= 0);
+  const avgDays = durations.length ? (durations.reduce((a,b)=>a+b,0)/durations.length).toFixed(1) : null;
+  return { total, completedCount:completed.length, openCount: total - completed.length, completionRate, avgDays };
+}
+
+function uid(prefix){ return prefix + "-" + Math.random().toString(36).slice(2,9).toUpperCase(); }
+
+function distinctValues(list, key){
+  const s = new Set();
+  list.forEach(it => { if(it[key]) s.add(it[key]); });
+  return Array.from(s);
+}
+
+function toCSV(columns, rows){
+  const header = columns.map(c => '"' + String(c.label).replace(/"/g,'""') + '"').join(",");
+  const lines = rows.map(row =>
+    columns.map(c => '"' + String(row[c.key] ?? "").replace(/"/g,'""') + '"').join(",")
+  );
+  return "﻿" + [header, ...lines].join("\r\n");
+}
+
+function downloadCSV(filename, csvContent){
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function printTable(title, columns, rows){
+  const win = window.open("", "_blank");
+  if(!win) return;
+  const headRow = columns.map(c => `<th>${c.label}</th>`).join("");
+  const bodyRows = rows.map(row =>
+    `<tr>${columns.map(c => `<td>${(row[c.key] ?? "")}</td>`).join("")}</tr>`
+  ).join("");
+  win.document.write(`
+    <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">
+    <title>${title}</title>
+    <style>
+      body{ font-family:Tahoma,Arial,sans-serif; padding:20px; direction:rtl; }
+      h2{ margin-bottom:4px; }
+      .meta{ color:#666; font-size:12px; margin-bottom:16px; }
+      table{ width:100%; border-collapse:collapse; font-size:12px; }
+      th,td{ border:1px solid #999; padding:6px 8px; text-align:right; }
+      th{ background:#eee; }
+    </style></head><body>
+    <h2>${title}</h2>
+    <div class="meta">تاريخ الطباعة: ${new Date().toLocaleString("en-US")} — عدد السجلات: ${rows.length}</div>
+    <table><thead><tr>${headRow}</tr></thead><tbody>${bodyRows}</tbody></table>
+    <script>window.onload = function(){ window.print(); }<\/script>
+    </body></html>
+  `);
+  win.document.close();
+}
+
+function compressImage(file, maxDim, quality){
+  maxDim = maxDim || 1000; quality = quality || 0.7;
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if(w > maxDim || h > maxDim){
+          if(w > h){ h = Math.round(h * maxDim / w); w = maxDim; }
+          else { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function ImportPanel(){
+  const [open,setOpen] = useState(false);
+  const [text,setText] = useState("");
+  const [status,setStatus] = useState("");
+  const [busy,setBusy] = useState(false);
+
+  const doImport = async () => {
+    setStatus("");
+    let data;
+    try{ data = JSON.parse(text); }catch{ setStatus("النص الملصق ليس JSON صالحًا"); return; }
+    setBusy(true);
+    try{
+      const keys = Object.keys(data);
+      for(const k of keys){ await saveList(k, data[k]); }
+      setStatus(`تم استيراد ${keys.length} قسم بنجاح ✓ — أعد تحميل الصفحة`);
+      setText("");
+    }catch(err){
+      setStatus("خطأ أثناء الاستيراد: " + (err && err.message ? err.message : String(err)));
+    }
+    setBusy(false);
+  };
+
+  if(!open){
+    return (
+      <div style={{ textAlign:"center", marginBottom:14 }}>
+        <button type="button" className="link-btn" onClick={()=>setOpen(true)}>استيراد بيانات (مرة واحدة فقط)</button>
+      </div>
+    );
+  }
+  return (
+    <div className="card" style={{ textAlign:"right", marginBottom:14 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+        <span>استيراد بيانات من النظام السابق</span>
+        <button className="icon-btn" onClick={()=>setOpen(false)}><IconX size={14}/></button>
+      </div>
+      <textarea rows="4" style={{ width:"100%", background:"var(--surface-2)", color:"var(--text)", border:"1px solid var(--border)", borderRadius:6, padding:8, fontSize:12 }}
+        placeholder="الصق هنا النص الذي نسخته بزر (تصدير نسخة كاملة)" value={text} onChange={e=>setText(e.target.value)} />
+      {status && <p className={status.includes("خطأ") ? "error" : "ok-msg"}>{status}</p>}
+      <button type="button" className="btn" style={{ marginTop:8 }} onClick={doImport} disabled={busy || !text.trim()}>
+        {busy ? "جارٍ الاستيراد..." : "استيراد الآن"}
+      </button>
+    </div>
+  );
+}
+
+function LoginScreen({ users, onLogin }){
+  const [username,setUsername] = useState("");
+  const [password,setPassword] = useState("");
+  const [err,setErr] = useState("");
+
+  const submit = () => {
+    setErr("");
+    const u = users.find(x => x.username === username && x.password === password);
+    if(!u){ setErr("اسم المستخدم أو كلمة المرور غير صحيحة"); return; }
+    onLogin(u);
+  };
+
+  return (
+    <div className="login-wrap">
+      <div className="logo">🔧</div>
+      <h2>نظام صيانة الورشة المركزية</h2>
+      <p style={{ color:"var(--muted)" }}>سجّل الدخول للمتابعة</p>
+      <ImportPanel />
+      <div className="login-form">
+        <div className="field">
+          <label>اسم المستخدم</label>
+          <input value={username} onChange={e=>setUsername(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>كلمة المرور</label>
+          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+        </div>
+        {err && <p className="error">خطأ: {err}</p>}
+        <button type="button" className="btn" onClick={submit}>دخول</button>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmInline({ text, onYes, onNo }){
+  return (
+    <div className="card" style={{ borderColor:"var(--err)" }}>
+      <p>{text}</p>
+      <div className="row-actions">
+        <button className="btn-danger" onClick={onYes}>نعم، تأكيد</button>
+        <button className="btn-secondary" onClick={onNo}>إلغاء</button>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({ equipmentCount, equipment, workorders, pmplans, purchaserequests, currentUser, sites, siteName }){
+  const rank = rankOf(currentUser);
+  const openWO = workorders.filter(w => w.status !== "مكتمل").length;
+  const pendingPR = purchaserequests.filter(p => p.status !== "مكتمل" && p.status !== "تم التسليم").length;
+
+  const myEquipmentIds = new Set(
+    equipment.filter(e => String(e.site_id) === String(currentUser.site_id)).map(e => e.equipment_id)
+  );
+  const scopedWO = rank === 3 ? workorders : workorders.filter(w => myEquipmentIds.has(w.equipment_id));
+  const kpi = computeKPI(scopedWO);
+
+  return (
+    <div>
+      <div className="card">
+        <h3>نظرة عامة</h3>
+        <div>
+          <span className="stat"><b>{equipmentCount}</b>معدات</span>
+          <span className="stat"><b>{openWO}</b>أوامر عمل مفتوحة</span>
+          <span className="stat"><b>{pmplans.length}</b>خطط صيانة وقائية</span>
+          <span className="stat"><b>{pendingPR}</b>طلبات قطع غيار معلقة</span>
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>مؤشرات الأداء {rank < 3 ? "(محطتي)" : "(عام لكل المحطات)"}</h3>
+        <div>
+          <span className="stat"><b>{kpi.completionRate}%</b>نسبة إنجاز أوامر العمل</span>
+          <span className="stat"><b>{kpi.completedCount}</b>أوامر مكتملة</span>
+          <span className="stat"><b>{kpi.openCount}</b>أوامر مفتوحة</span>
+          <span className="stat"><b>{kpi.avgDays !== null ? kpi.avgDays : "—"}</b>متوسط أيام الإغلاق</span>
+        </div>
+      </div>
+
+      {rank === 3 && sites.length > 0 && (
+        <div className="card">
+          <h3>مؤشرات الأداء حسب المحطة</h3>
+          <div style={{ overflowX:"auto" }}>
+            <table>
+              <thead><tr>
+                <th>المحطة</th><th>معدات</th><th>أوامر عمل</th><th>نسبة الإنجاز</th><th>متوسط أيام الإغلاق</th>
+              </tr></thead>
+              <tbody>
+                {sites.map(s => {
+                  const siteEquip = equipment.filter(e => String(e.site_id) === String(s.site_id));
+                  const siteEqIds = new Set(siteEquip.map(e => e.equipment_id));
+                  const siteWO = workorders.filter(w => siteEqIds.has(w.equipment_id));
+                  const sKpi = computeKPI(siteWO);
+                  return (
+                    <tr key={s.site_id}>
+                      <td>{siteName(s.site_id)}</td>
+                      <td>{siteEquip.length}</td>
+                      <td>{sKpi.total}</td>
+                      <td>{sKpi.completionRate}%</td>
+                      <td>{sKpi.avgDays !== null ? sKpi.avgDays : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GenericTable({ title, items, columns, onAdd=()=>{}, onEdit=()=>{}, onDelete=()=>{}, canEdit, idField, canExport, dateField, resolveSite, sitePairs }){
+  const [confirmId,setConfirmId] = useState(null);
+  const [q,setQ] = useState("");
+  const [dateFrom,setDateFrom] = useState("");
+  const [dateTo,setDateTo] = useState("");
+  const [siteFilter,setSiteFilter] = useState("");
+
+  let filtered = q.trim()
+    ? items.filter(it => columns.some(c => String(it[c.key] ?? "").toLowerCase().includes(q.toLowerCase())))
+    : items;
+
+  if(dateField && dateFrom){
+    filtered = filtered.filter(it => it[dateField] && String(it[dateField]).slice(0,10) >= dateFrom);
+  }
+  if(dateField && dateTo){
+    filtered = filtered.filter(it => it[dateField] && String(it[dateField]).slice(0,10) <= dateTo);
+  }
+  if(resolveSite && siteFilter){
+    filtered = filtered.filter(it => String(resolveSite(it)) === String(siteFilter));
+  }
+
+  const doExport = () => downloadCSV(`${title}.csv`, toCSV(columns, filtered));
+  const doPrint = () => printTable(title, columns, filtered);
+
+  return (
+    <div className="card">
+      <div className="topbar">
+        <h3>{title} ({items.length})</h3>
+        {canEdit && <button className="btn-secondary" onClick={onAdd}><IconPlus size={13}/> إضافة</button>}
+      </div>
+      <div className="search-box">
+        <input placeholder="بحث..." value={q} onChange={e=>setQ(e.target.value)} />
+      </div>
+      {canExport && (
+        <div className="card" style={{ background:"var(--surface-2)", padding:10, marginBottom:10 }}>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"flex-end" }}>
+            {dateField && (
+              <React.Fragment>
+                <div className="field" style={{ margin:0, minWidth:130 }}>
+                  <label>من تاريخ</label>
+                  <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} />
+                </div>
+                <div className="field" style={{ margin:0, minWidth:130 }}>
+                  <label>إلى تاريخ</label>
+                  <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} />
+                </div>
+              </React.Fragment>
+            )}
+            {resolveSite && (
+              <div className="field" style={{ margin:0, minWidth:150 }}>
+                <label>المحطة</label>
+                <select value={siteFilter} onChange={e=>setSiteFilter(e.target.value)}>
+                  <option value="">كل المحطات</option>
+                  {sitePairs.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              </div>
+            )}
+            <button className="btn-secondary" onClick={doExport}>تصدير Excel (CSV)</button>
+            <button className="btn-secondary" onClick={doPrint}>🖨️ طباعة</button>
+          </div>
+        </div>
+      )}
+      <div style={{ overflowX:"auto" }}>
+        <table>
+          <thead><tr>
+            {columns.map(c => <th key={c.key}>{c.label}</th>)}
+            {canEdit && <th>إجراءات</th>}
+          </tr></thead>
+          <tbody>
+            {filtered.map(item => (
+              <tr key={item[idField]}>
+                {columns.map(c => <td key={c.key}>{c.render ? c.render(item) : String(item[c.key] ?? "")}</td>)}
+                {canEdit && (
+                  <td>
+                    <div className="row-actions">
+                      <button className="icon-btn" onClick={()=>onEdit(item)}>تعديل</button>
+                      <button className="btn-danger" onClick={()=>setConfirmId(item[idField])}>حذف</button>
+                    </div>
+                  </td>
+                )}
+              </tr>
+            ))}
+            {filtered.length === 0 && <tr><td colSpan={columns.length+1} style={{ textAlign:"center", color:"var(--muted)" }}>لا توجد بيانات</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {confirmId && (
+        <ConfirmInline text="هل أنت متأكد من الحذف؟" onYes={()=>{ onDelete(confirmId); setConfirmId(null); }} onNo={()=>setConfirmId(null)} />
+      )}
+    </div>
+  );
+}
+
+function EditModal({ title, fields, values, onChange, onSave, onClose }){
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
+        <div className="topbar"><h3>{title}</h3><button className="icon-btn" onClick={onClose}><IconX size={14}/></button></div>
+        {fields.map(f => (
+          <div className="field" key={f.key}>
+            <label>{f.label}</label>
+
+            {f.type === "select" && (
+              <select value={values[f.key] || ""} onChange={e=>onChange(f.key, e.target.value)}>
+                <option value="">اختر</option>
+                {(f.optionPairs || (f.options||[]).map(o=>({value:o,label:o}))).map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            )}
+
+            {f.type === "combo" && (
+              <div>
+                <select value={values[f.key] || ""} onChange={e=>onChange(f.key, e.target.value)} style={{ marginBottom:6 }}>
+                  <option value="">— اختر من القائمة —</option>
+                  {(f.optionPairs || (f.options||[]).map(o=>({value:o,label:o}))).map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <input list={`dl-${f.key}`} placeholder="أو اكتب للبحث السريع..." value={values[f.key] || ""} onChange={e=>onChange(f.key, e.target.value)} />
+                <datalist id={`dl-${f.key}`}>
+                  {(f.optionPairs || (f.options||[]).map(o=>({value:o,label:o}))).map(o => (
+                    <option key={o.value} value={o.value} label={o.label !== o.value ? o.label : undefined} />
+                  ))}
+                </datalist>
+                <div className="hint">اختر من القائمة المنسدلة أعلاه، أو اكتب حرفًا للبحث السريع في الحقل تحتها</div>
+              </div>
+            )}
+
+            {f.type === "file" && (
+              <div>
+                {values[f.key] && <img src={values[f.key]} className="thumb" style={{ marginBottom:6, width:80, height:80 }} />}
+                <input type="file" accept="image/*" onChange={async e=>{
+                  const file = e.target.files[0];
+                  if(!file) return;
+                  const dataUrl = await compressImage(file);
+                  onChange(f.key, dataUrl);
+                }} />
+              </div>
+            )}
+
+            {(!f.type || f.type === "text" || f.type === "number" || f.type === "date") && (
+              <input type={f.type || "text"} value={values[f.key] || ""} onChange={e=>onChange(f.key, e.target.value)} />
+            )}
+          </div>
+        ))}
+        <button type="button" className="btn" onClick={onSave}>حفظ</button>
+      </div>
+    </div>
+  );
+}
+
+function SectionTable({ title, storageKey, idField, idPrefix, data, setData, canEdit, fieldsDef, columns, defaultsOnAdd, currentUser, onLog, canExport, dateField, resolveSite, sitePairs, onBeforeSave }){
+  const [modal,setModal] = useState(null);
+
+  const save = async () => {
+    let record = { ...modal };
+    const isNew = !record[idField];
+    if(isNew){
+      const defaults = typeof defaultsOnAdd === "function" ? defaultsOnAdd() : (defaultsOnAdd || {});
+      record = { ...defaults, ...record, [idField]: uid(idPrefix) };
+    }
+    if(typeof onBeforeSave === "function"){ record = onBeforeSave(record) || record; }
+    record.last_modified_by = currentUser.full_name;
+    record.last_modified_at = new Date().toISOString();
+
+    let next;
+    if(!isNew){ next = data.map(d => d[idField] === record[idField] ? record : d); }
+    else { next = [...data, record]; }
+    setData(next);
+    await saveList(storageKey, next);
+    if(onLog) onLog(isNew ? "إضافة" : "تعديل", storageKey, record[idField]);
+    setModal(null);
+  };
+  const del = async (id) => {
+    const next = data.filter(d => d[idField] !== id);
+    setData(next);
+    await saveList(storageKey, next);
+    if(onLog) onLog("حذف", storageKey, id);
+  };
+
+  return (
+    <div>
+      <GenericTable title={title} items={data} columns={columns} canEdit={canEdit} idField={idField}
+        canExport={canExport} dateField={dateField} resolveSite={resolveSite} sitePairs={sitePairs}
+        onAdd={()=>setModal(Object.fromEntries(fieldsDef.map(f=>[f.key,""])))}
+        onEdit={(item)=>setModal(item)} onDelete={del} />
+      {modal && (
+        <EditModal title={modal[idField] ? "تعديل" : "إضافة"} fields={fieldsDef}
+          values={modal} onChange={(k,v)=>setModal({...modal,[k]:v})} onSave={save} onClose={()=>setModal(null)} />
+      )}
+    </div>
+  );
+}
+
+function Reports({ equipment, workorders, pmplans, purchaserequests, transfers, users, spareparts, canExportPrint }){
+  const [copied,setCopied] = useState("");
+  const exportAll = () => {
+    const payload = { equipment, workorders, pmplans, purchaserequests, transfers, users, spareparts };
+    const json = JSON.stringify(payload);
+    navigator.clipboard.writeText(json).then(()=> setCopied("تم نسخ نسخة كاملة من البيانات ✓")).catch(()=> setCopied("تعذر النسخ التلقائي"));
+  };
+
+  const SECTIONS = [
+    { title:"المعدات", data:equipment, columns:[{key:"name",label:"الرمز"},{key:"desc",label:"الوصف"},{key:"type",label:"النوع"},{key:"status",label:"الحالة"},{key:"site_id",label:"الموقع"}] },
+    { title:"أوامر العمل", data:workorders, columns:[{key:"wo_id",label:"الرقم"},{key:"equipment_id",label:"المعدة"},{key:"fault_category",label:"تصنيف العطل"},{key:"description",label:"الوصف"},{key:"status",label:"الحالة"},{key:"opened_at",label:"تاريخ الفتح"},{key:"closed_at",label:"تاريخ الإغلاق"}] },
+    { title:"الصيانة الوقائية", data:pmplans, columns:[{key:"pm_id",label:"الرقم"},{key:"equipment_id",label:"المعدة"},{key:"notes",label:"ملاحظات"}] },
+    { title:"طلبات قطع الغيار", data:purchaserequests, columns:[{key:"pr_id",label:"الرقم"},{key:"part_name",label:"الصنف"},{key:"quantity",label:"الكمية"},{key:"status",label:"الحالة"},{key:"equipment_id",label:"المعدة"},{key:"request_date",label:"التاريخ"}] },
+    { title:"قطع الغيار", data:spareparts, columns:[{key:"part_name",label:"اسم القطعة"},{key:"price",label:"السعر"},{key:"brand",label:"الماركة"},{key:"country",label:"بلد الصنع"},{key:"equipment_id",label:"المعدة"},{key:"received_date",label:"التاريخ"}] },
+    { title:"النقل", data:transfers, columns:[{key:"equipment_id",label:"المعدة"},{key:"to_site_id",label:"إلى موقع"},{key:"reason",label:"السبب"}] },
+  ];
+
+  return (
+    <div>
+      <div className="card">
+        <h3>نسخة احتياطية كاملة</h3>
+        <button className="btn-secondary" onClick={exportAll}><IconCopy size={13}/> تصدير نسخة كاملة (نسخ للحافظة)</button>
+        {copied && <p className="ok-msg">{copied}</p>}
+        <p style={{ color:"var(--muted)", fontSize:13 }}>احتفظ بهذه النسخة أسبوعيًا كخط رجعة إضافي.</p>
+      </div>
+
+      {canExportPrint && (
+        <div className="card">
+          <h3>تصدير وطباعة حسب القسم</h3>
+          <p style={{ color:"var(--muted)", fontSize:13, marginBottom:10 }}>لتصفية حسب تاريخ أو محطة معينة، افتح الصفحة المطلوبة مباشرة — خيارات التصفية والتصدير متاحة في أعلى كل صفحة.</p>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {SECTIONS.map(s => (
+              <div key={s.title} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:"1px solid var(--border)", paddingBottom:8 }}>
+                <span>{s.title} ({s.data.length})</span>
+                <div className="row-actions">
+                  <button className="icon-btn" onClick={()=>downloadCSV(`${s.title}.csv`, toCSV(s.columns, s.data))}>تصدير Excel</button>
+                  <button className="icon-btn" onClick={()=>printTable(s.title, s.columns, s.data)}>🖨️ طباعة</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function App(){
+  const [users,setUsers] = useState(null);
+  const [equipment,setEquipment] = useState([]);
+  const [workorders,setWorkorders] = useState([]);
+  const [pmplans,setPmplans] = useState([]);
+  const [purchaserequests,setPurchaserequests] = useState([]);
+  const [transfers,setTransfers] = useState([]);
+  const [spareparts,setSpareparts] = useState([]);
+  const [sites,setSites] = useState([]);
+  const [activitylog,setActivitylog] = useState([]);
+  const [currentUser,setCurrentUser] = useState(null);
+  const [tab,setTab] = useState("dashboard");
+  const [loading,setLoading] = useState(true);
+  const [loadErr,setLoadErr] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try{
+        const [u,e,w,p,pr,t,s,sp,log] = await Promise.all([
+          loadList("users"), loadList("equipment"), loadList("workorders"),
+          loadList("pmplans"), loadList("purchaserequests"), loadList("transfers"),
+          loadList("sites"), loadList("spareparts"), loadList("activitylog"),
+        ]);
+        setUsers(u.length ? u : [{ user_id:"admin", username:"admin", password:"admin123", full_name:"مدير النظام", role_name:"مدير الصيانة" }]);
+        setEquipment(e); setWorkorders(w); setPmplans(p); setPurchaserequests(pr);
+        setTransfers(t); setSites(s); setSpareparts(sp); setActivitylog(log);
+      }catch(err){
+        setLoadErr("تعذر تحميل البيانات: " + (err && err.message ? err.message : String(err)));
+        setUsers([{ user_id:"admin", username:"admin", password:"admin123", full_name:"مدير النظام", role_name:"مدير الصيانة" }]);
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  if(loading) return <div className="app" style={{ textAlign:"center", paddingTop:60 }}>جارٍ التحميل...</div>;
+  if(!currentUser){ return <LoginScreen users={users || []} onLogin={setCurrentUser} />; }
+
+  const rank = rankOf(currentUser);
+  const canEdit = rank >= 1;
+  const canSeeUsers = rank === 3;
+  const isManager = rank === 3;
+
+  const siteMap = Object.fromEntries(sites.map(s => [s.site_id, s.site_name || s.name || s.site_id]));
+  const siteName = (id) => siteMap[id] || id || "—";
+  const sitePairs = sites.map(s => ({ value: s.site_id, label: s.site_name || s.name || s.site_id }));
+
+  const visibleEquipment = isManager ? equipment : equipment.filter(e => String(e.site_id) === String(currentUser.site_id));
+
+  const equipmentOptionPairs = equipment.map(e => ({ value: e.equipment_id, label: `${e.name||""}${e.desc ? " - "+e.desc : ""}` }));
+  const equipmentSiteMap = Object.fromEntries(equipment.map(e => [e.equipment_id, e.site_id]));
+  const canExportPrint = rank >= 2;
+
+  const onLog = async (action, section, recordId) => {
+    const entry = { id: uid("log"), at: new Date().toISOString(), by: currentUser.username, by_name: currentUser.full_name, section, action, record: recordId };
+    const next = [entry, ...activitylog].slice(0, 500);
+    setActivitylog(next);
+    try{ await saveList("activitylog", next); }catch{}
+  };
+
+  const TABS = [
+    { key:"dashboard", label:"لوحة التحكم", icon:IconDash },
+    { key:"equipment", label:"المعدات", icon:IconBox },
+    { key:"workorders", label:"أوامر العمل", icon:IconList },
+    { key:"pm", label:"الصيانة الوقائية", icon:IconCal },
+    { key:"pr", label:"طلبات الشراء", icon:IconSearch },
+    { key:"parts", label:"قطع الغيار", icon:IconParts },
+    { key:"transfers", label:"النقل", icon:IconSwap },
+    { key:"reports", label:"التقارير", icon:IconReport },
+  ];
+  if(canSeeUsers){
+    TABS.push({ key:"sites", label:"المحطات", icon:IconSite });
+    TABS.push({ key:"users", label:"المستخدمون", icon:IconUsers });
+    TABS.push({ key:"log", label:"سجل النشاط", icon:IconLog });
+  }
+
+  const equipmentFieldsDef = [
+    { key:"name", label:"الرمز" },
+    { key:"desc", label:"الوصف" },
+    { key:"type", label:"النوع", type:"combo", options:distinctValues(equipment,"type") },
+    { key:"model", label:"الموديل" },
+    { key:"plate", label:"رقم اللوحة" },
+    { key:"barcode", label:"الباركود" },
+    { key:"status", label:"الحالة", type:"select", options:["يعمل","متوقف","تحت الصيانة","مفتوح"] },
+    { key:"condition", label:"الحالة الفنية", type:"combo", options:distinctValues(equipment,"condition") },
+    ...(isManager ? [{ key:"site_id", label:"الموقع", type:"select", optionPairs:sitePairs }] : []),
+    { key:"purchaseYear", label:"سنة الشراء" },
+  ];
+
+  return (
+    <div className="app">
+      <div className="topbar">
+        <div><IconWrench size={20}/> نظام صيانة الورشة المركزية</div>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <span style={{ color:"var(--muted)", fontSize:13 }}>{currentUser.full_name} ({currentUser.role_name || "—"})</span>
+          <button className="btn-secondary" onClick={()=>setCurrentUser(null)}><IconLogout size={13}/> خروج</button>
+        </div>
+      </div>
+      {loadErr && <p className="error">{loadErr}</p>}
+      <div className="tabs">
+        {TABS.map(t => (
+          <button key={t.key} className={`tab ${tab===t.key?"active":""}`} onClick={()=>setTab(t.key)}>
+            <t.icon size={13}/> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "dashboard" && (
+        <Dashboard equipmentCount={visibleEquipment.length} equipment={equipment} workorders={workorders}
+          pmplans={pmplans} purchaserequests={purchaserequests} currentUser={currentUser}
+          sites={sites} siteName={siteName} />
+      )}
+
+      {tab === "equipment" && (
+        <SectionTable title="المعدات" storageKey="equipment" idField="equipment_id" idPrefix="eq"
+          data={visibleEquipment} setData={setEquipment} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} resolveSite={isManager ? (it=>it.site_id) : null} sitePairs={sitePairs}
+          defaultsOnAdd={() => isManager ? {} : { site_id: currentUser.site_id }}
+          columns={[
+            { key:"name", label:"الرمز" },
+            { key:"desc", label:"الوصف" },
+            { key:"type", label:"النوع" },
+            { key:"status", label:"الحالة" },
+            { key:"site_id", label:"الموقع", render:item=>siteName(item.site_id) },
+          ]}
+          fieldsDef={equipmentFieldsDef}
+        />
+      )}
+
+      {tab === "workorders" && (
+        <SectionTable title="أوامر العمل" storageKey="workorders" idField="wo_id" idPrefix="WO"
+          data={workorders} setData={setWorkorders} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} dateField="opened_at" resolveSite={it=>equipmentSiteMap[it.equipment_id]} sitePairs={sitePairs}
+          onBeforeSave={(record) => {
+            if(record.status === "مكتمل" && !record.closed_at){ record.closed_at = new Date().toISOString(); }
+            else if(record.status !== "مكتمل"){ delete record.closed_at; }
+            if(!record.opened_at){ record.opened_at = new Date().toISOString(); }
+            return record;
+          }}
+          columns={[
+            { key:"wo_id", label:"الرقم" },
+            { key:"equipment_id", label:"المعدة" },
+            { key:"fault_category", label:"تصنيف العطل", render:item=>renderFaultCategory(item.fault_category) },
+            { key:"description", label:"الوصف" },
+            { key:"status", label:"الحالة" },
+          ]}
+          fieldsDef={[
+            { key:"equipment_id", label:"المعدة", type:"combo", optionPairs:equipmentOptionPairs },
+            { key:"type", label:"النوع", type:"combo", options:distinctValues(workorders,"type") },
+            { key:"fault_category", label:"تصنيف العطل", type:"select", optionPairs:FAULT_CATEGORY_OPTION_PAIRS },
+            { key:"description", label:"الوصف" },
+            { key:"status", label:"الحالة", type:"select", options:["مفتوح","قيد التنفيذ","مكتمل","معلق"] },
+            { key:"priority", label:"الأولوية", type:"select", options:["عاجل","عالي","عادي","منخفض"] },
+          ]}
+        />
+      )}
+
+      {tab === "pm" && (
+        <SectionTable title="خطط الصيانة الوقائية" storageKey="pmplans" idField="pm_id" idPrefix="PM"
+          data={pmplans} setData={setPmplans} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} resolveSite={it=>equipmentSiteMap[it.equipment_id]} sitePairs={sitePairs}
+          columns={[
+            { key:"pm_id", label:"الرقم" },
+            { key:"equipment_id", label:"المعدة" },
+            { key:"notes", label:"ملاحظات" },
+          ]}
+          fieldsDef={[
+            { key:"equipment_id", label:"المعدة", type:"combo", optionPairs:equipmentOptionPairs },
+            { key:"notes", label:"ملاحظات" },
+          ]}
+        />
+      )}
+
+      {tab === "pr" && (
+        <SectionTable title="طلبات قطع الغيار" storageKey="purchaserequests" idField="pr_id" idPrefix="PR"
+          data={purchaserequests} setData={setPurchaserequests} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} dateField="request_date" resolveSite={it=>equipmentSiteMap[it.equipment_id]} sitePairs={sitePairs}
+          columns={[
+            { key:"pr_id", label:"الرقم" },
+            { key:"part_name", label:"الصنف" },
+            { key:"quantity", label:"الكمية" },
+            { key:"status", label:"الحالة" },
+            { key:"equipment_id", label:"المعدة" },
+          ]}
+          fieldsDef={[
+            { key:"part_name", label:"الصنف", type:"combo", options:distinctValues(purchaserequests,"part_name") },
+            { key:"quantity", label:"الكمية", type:"number" },
+            { key:"equipment_id", label:"المعدة", type:"combo", optionPairs:equipmentOptionPairs },
+            { key:"status", label:"الحالة", type:"select", options:["مقدم","تم الموافقة","تم التسليم","مكتمل"] },
+            { key:"notes", label:"ملاحظات" },
+          ]}
+        />
+      )}
+
+      {tab === "parts" && (
+        <SectionTable title="قطع الغيار (المخزون)" storageKey="spareparts" idField="part_id" idPrefix="SP"
+          data={spareparts} setData={setSpareparts} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} dateField="received_date" resolveSite={it=>equipmentSiteMap[it.equipment_id]} sitePairs={sitePairs}
+          columns={[
+            { key:"part_name", label:"اسم القطعة" },
+            { key:"price", label:"السعر" },
+            { key:"brand", label:"الماركة" },
+            { key:"country", label:"بلد الصنع" },
+            { key:"equipment_id", label:"المعدة" },
+            { key:"invoice_image", label:"الفاتورة", render:item=> item.invoice_image ? <a href={item.invoice_image} target="_blank" rel="noreferrer">عرض</a> : "—" },
+          ]}
+          fieldsDef={[
+            { key:"part_name", label:"اسم القطعة", type:"combo", options:distinctValues(spareparts,"part_name") },
+            { key:"price", label:"السعر", type:"number" },
+            { key:"brand", label:"الماركة", type:"combo", options:distinctValues(spareparts,"brand") },
+            { key:"country", label:"بلد الصنع", type:"combo", options:distinctValues(spareparts,"country") },
+            { key:"equipment_id", label:"المعدة المرتبطة", type:"combo", optionPairs:equipmentOptionPairs },
+            { key:"received_date", label:"تاريخ الاستلام", type:"date" },
+            { key:"notes", label:"ملاحظات" },
+            { key:"invoice_image", label:"صورة الفاتورة", type:"file" },
+          ]}
+        />
+      )}
+
+      {tab === "transfers" && (
+        <SectionTable title="حركة النقل بين المواقع" storageKey="transfers" idField="transfer_id" idPrefix="TR"
+          data={transfers} setData={setTransfers} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} resolveSite={it=>it.to_site_id} sitePairs={sitePairs}
+          columns={[
+            { key:"equipment_id", label:"المعدة" },
+            { key:"to_site_id", label:"إلى موقع", render:item=>siteName(item.to_site_id) },
+            { key:"reason", label:"السبب" },
+          ]}
+          fieldsDef={[
+            { key:"equipment_id", label:"المعدة", type:"combo", optionPairs:equipmentOptionPairs },
+            { key:"to_site_id", label:"إلى موقع", type:"select", optionPairs:sitePairs },
+            { key:"reason", label:"السبب" },
+          ]}
+        />
+      )}
+
+      {tab === "reports" && <Reports equipment={equipment} workorders={workorders} pmplans={pmplans} purchaserequests={purchaserequests} transfers={transfers} users={users} spareparts={spareparts} canExportPrint={canExportPrint} />}
+
+      {tab === "sites" && canSeeUsers && (
+        <SectionTable title="المحطات" storageKey="sites" idField="site_id" idPrefix="site"
+          data={sites} setData={setSites} canEdit={true} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint}
+          columns={[
+            { key:"site_id", label:"الرمز" },
+            { key:"site_name", label:"اسم المحطة" },
+          ]}
+          fieldsDef={[
+            { key:"site_name", label:"اسم المحطة" },
+          ]}
+        />
+      )}
+
+      {tab === "users" && canSeeUsers && (
+        <SectionTable title="المستخدمون" storageKey="users" idField="user_id" idPrefix="user"
+          data={users} setData={setUsers} canEdit={true} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} resolveSite={it=>it.site_id} sitePairs={sitePairs}
+          columns={[
+            { key:"username", label:"اسم المستخدم" },
+            { key:"full_name", label:"الاسم الكامل" },
+            { key:"role_name", label:"الصلاحية" },
+            { key:"site_id", label:"الموقع", render:item=>siteName(item.site_id) },
+          ]}
+          fieldsDef={[
+            { key:"username", label:"اسم المستخدم" },
+            { key:"password", label:"كلمة المرور" },
+            { key:"full_name", label:"الاسم الكامل" },
+            { key:"role_name", label:"الصلاحية", type:"select", options:["فني","مسؤول صيانة","مهندس صيانة","مدير الصيانة"] },
+            { key:"site_id", label:"الموقع", type:"select", optionPairs:sitePairs },
+          ]}
+        />
+      )}
+
+      {tab === "log" && canSeeUsers && (
+        <GenericTable title="سجل النشاط" items={activitylog} idField="id" canEdit={false}
+          columns={[
+            { key:"at", label:"التاريخ", render:item=> new Date(item.at).toLocaleString("en-US") },
+            { key:"by_name", label:"المستخدم" },
+            { key:"section", label:"القسم", render:item=> SECTION_LABELS[item.section] || item.section },
+            { key:"action", label:"الإجراء" },
+            { key:"record", label:"الرقم" },
+          ]}
+        />
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
