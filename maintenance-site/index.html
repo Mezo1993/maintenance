@@ -37,17 +37,30 @@
   table{ width:100%; border-collapse:collapse; font-size:13px; }
   th,td{ padding:8px; text-align:right; border-bottom:1px solid var(--border); }
   th{ color:var(--muted); font-weight:600; }
-  .row-actions{ display:flex; gap:6px; }
+  .row-actions{ display:flex; gap:6px; flex-wrap:wrap; }
   .icon-btn{ background:transparent; border:1px solid var(--border); border-radius:6px; padding:4px 8px; color:var(--text); }
   .stat{ display:inline-block; background:var(--surface-2); border-radius:8px; padding:12px 16px; margin:4px; min-width:120px; text-align:center; }
   .stat b{ display:block; font-size:22px; color:var(--accent); }
   .link-btn{ background:none; border:none; color:var(--accent); text-decoration:underline; font-size:13px; }
   .modal-bg{ position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; padding:16px; z-index:50; }
-  .modal{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; max-width:480px; width:100%; max-height:85vh; overflow:auto; }
+  .modal{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:20px; max-width:480px; width:100%; max-height:88vh; overflow:auto; }
+  .modal.wide{ max-width:780px; }
   .search-box{ margin-bottom:10px; }
   .search-box input{ width:100%; padding:8px 10px; border-radius:6px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); }
   .thumb{ width:40px; height:40px; object-fit:cover; border-radius:4px; border:1px solid var(--border); }
   .hint{ font-size:11px; color:var(--muted); margin-top:4px; }
+  .badge{ display:inline-block; padding:2px 10px; border-radius:10px; font-size:12px; font-weight:700; white-space:nowrap; }
+  .badge.high{ background:rgba(242,134,123,.18); color:var(--err); }
+  .badge.mid{ background:rgba(233,130,45,.18); color:var(--accent); }
+  .badge.low{ background:rgba(76,175,125,.18); color:var(--ok); }
+  .alert-row{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px; flex-wrap:wrap; }
+  .line-box{ border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:10px; background:var(--surface-2); }
+  .line-box .field input, .line-box .field select{ background:var(--surface); }
+  .grid2{ display:grid; grid-template-columns:repeat(2,1fr); gap:0 10px; }
+  .grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
+  .info{ background:var(--surface-2); border-radius:8px; padding:8px 10px; font-size:13px; }
+  .info span{ display:block; color:var(--muted); font-size:11px; margin-bottom:2px; }
+  @media (max-width:600px){ .grid2,.grid3{ grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -76,6 +89,9 @@ const IconUsers = makeIcon("👥");
 const IconParts = makeIcon("🔩");
 const IconLog = makeIcon("📝");
 const IconSite = makeIcon("🏭");
+const IconPredict = makeIcon("📡");
+const IconCatalog = makeIcon("📚");
+const IconAcc = makeIcon("🎛️");
 
 const FN = "/.netlify/functions/data";
 
@@ -100,10 +116,10 @@ async function saveList(key, list){
   return list;
 }
 
-const ROLE_RANK = { "فني":0, "مسؤول صيانة":1, "مهندس صيانة":2, "مدير الصيانة":3 };
+const ROLE_RANK = { "فني":0, "مسؤول صيانة":1, "مهندس صيانة":2, "مدير الصيانة":3, "أدمن":4 };
 function rankOf(user){ return ROLE_RANK[user && user.role_name] ?? 0; }
 
-const SECTION_LABELS = { equipment:"معدات", workorders:"أوامر عمل", pmplans:"صيانة وقائية", purchaserequests:"طلبات شراء", transfers:"نقل", spareparts:"قطع غيار", users:"مستخدمون", sites:"محطات" };
+const SECTION_LABELS = { equipment:"معدات", workorders:"أوامر عمل", pmplans:"صيانة وقائية", purchaserequests:"طلبات شراء", transfers:"نقل", spareparts:"قطع غيار", users:"مستخدمون", sites:"محطات", invoices:"فواتير", accessories:"ملحقات", readings:"قراءات حالة" };
 const FAULT_CATEGORIES = [
   { code:"HYD", label:"هيدروليك" },
   { code:"MEC", label:"ميكانيكا" },
@@ -119,6 +135,34 @@ function renderFaultCategory(code){
   const label = FAULT_CATEGORY_MAP[code];
   return label ? (<span>{code} <span style={{ color:"var(--muted)" }}>({label})</span></span>) : code;
 }
+function faultText(code){
+  if(!code) return "";
+  const label = FAULT_CATEGORY_MAP[code];
+  return label ? `${code} (${label})` : code;
+}
+
+const PRIORITIES = ["عاجل","عالي","عادي","منخفض"];
+const PR_STATUSES = ["مقدم","تم الموافقة","تم التسليم","مكتمل","ملغي"];
+const PR_CLOSED = ["مكتمل","تم التسليم","ملغي"];
+const EQUIPMENT_STATUSES = ["يعمل","متوقف","تحت الصيانة","مفتوح","سكراب"];
+
+function todayStr(){
+  const d = new Date(); const p = n => String(n).padStart(2,"0");
+  return d.getFullYear() + "-" + p(d.getMonth()+1) + "-" + p(d.getDate());
+}
+function fmtDate(d){
+  if(!d) return "—";
+  const x = new Date(d);
+  return isNaN(x.getTime()) ? "—" : x.toISOString().slice(0,10);
+}
+function numOrNull(v){
+  if(v === "" || v === null || v === undefined) return null;
+  const n = Number(v);
+  return isFinite(n) ? n : null;
+}
+// يحذف بادئة eq من رمز المعدة (للعرض خارج صفحة المعدات)
+function stripEq(v){ return String(v ?? "").replace(/^\s*eq[-_\s]*/i, ""); }
+
 function computeKPI(list){
   const total = list.length;
   const completed = list.filter(w => w.status === "مكتمل");
@@ -131,6 +175,163 @@ function computeKPI(list){
   return { total, completedCount:completed.length, openCount: total - completed.length, completionRate, avgDays };
 }
 
+// ---- طلبات الشراء: مدة الطلب القصوى 3 أشهر ----
+function prInfo(pr){
+  const start = pr.request_date || (pr.last_modified_at ? String(pr.last_modified_at).slice(0,10) : null);
+  if(!start) return null;
+  const s = new Date(start);
+  if(isNaN(s.getTime())) return null;
+  const expiry = new Date(s.getTime());
+  expiry.setMonth(expiry.getMonth() + 3);
+  const daysLeft = Math.ceil((expiry.getTime() - Date.now()) / 86400000);
+  return { start, expiry, daysLeft };
+}
+function prAlertLevel(pr){
+  if(PR_CLOSED.includes(pr.status)) return null;
+  const i = prInfo(pr);
+  if(!i) return null;
+  if(i.daysLeft < 0) return "expired";
+  if(i.daysLeft <= 14) return "soon";
+  return null;
+}
+function prExpiryText(pr){
+  if(PR_CLOSED.includes(pr.status)) return "—";
+  const i = prInfo(pr);
+  if(!i) return "—";
+  return i.daysLeft < 0 ? `منتهي منذ ${-i.daysLeft} يوم` : `${i.daysLeft} يوم`;
+}
+
+// ---- كتالوج القطع (مشتق من الطلبات والمشتريات) ----
+function buildCatalog(spareparts, purchaserequests, invoiceMap){
+  const map = {};
+  const norm = s => String(s || "").trim().toLowerCase();
+  const get = (name) => {
+    const k = norm(name);
+    if(!k) return null;
+    if(!map[k]) map[k] = { key:k, part_name:String(name).trim(), part_no:"", brand:"", country:"", requests:[], purchases:[], equipment:new Set(), last_price:null, last_price_date:"" };
+    return map[k];
+  };
+  purchaserequests.forEach(r => {
+    const c = get(r.part_name); if(!c) return;
+    c.requests.push(r);
+    if(r.part_no) c.part_no = r.part_no;
+    if(r.equipment_id) c.equipment.add(r.equipment_id);
+  });
+  spareparts.forEach(p => {
+    const c = get(p.part_name); if(!c) return;
+    c.purchases.push(p);
+    if(p.part_no) c.part_no = p.part_no;
+    if(p.brand) c.brand = p.brand;
+    if(p.country) c.country = p.country;
+    if(p.equipment_id) c.equipment.add(p.equipment_id);
+    const inv = invoiceMap[p.invoice_id];
+    const d = p.received_date || (inv && inv.date) || "";
+    if(numOrNull(p.price) !== null && (c.last_price === null || d >= c.last_price_date)){ c.last_price = p.price; c.last_price_date = d; }
+  });
+  return Object.values(map).map(c => ({
+    ...c,
+    equipment: Array.from(c.equipment),
+    request_count: c.requests.length,
+    total_qty: c.purchases.reduce((s,p) => s + (Number(p.qty)||0), 0),
+  })).sort((a,b) => a.part_name.localeCompare(b.part_name, "ar"));
+}
+
+// ---- الصيانة التنبؤية ----
+const READING_PARAMS = ["ساعات التشغيل","عداد المسافة (كم)","درجة حرارة المحرك (°C)","ضغط زيت المحرك (bar)","الاهتزاز (mm/s)","ضغط النظام الهيدروليكي (bar)","درجة حرارة الزيت الهيدروليكي (°C)","تيار المحرك (A)","جزيئات الزيت (ppm)","سُمك البطانات (mm)"];
+const DIR_PAIRS = [{ value:"high", label:"ارتفاع القيمة = خطر" }, { value:"low", label:"انخفاض القيمة = خطر" }];
+const LEVEL_LABEL = { high:"مرتفع", mid:"متوسط", low:"منخفض" };
+
+function analyzeSeries(rs){
+  const pts = rs
+    .map(r => ({ t:new Date(r.date).getTime()/86400000, v:numOrNull(r.value), r }))
+    .filter(p => isFinite(p.t) && p.v !== null)
+    .sort((a,b) => a.t - b.t);
+  if(!pts.length) return null;
+  const last = pts[pts.length-1];
+  const warn = numOrNull(last.r.warn_limit), crit = numOrNull(last.r.crit_limit);
+  const low = last.r.direction === "low";
+  const beyond = (v, lim) => lim === null ? false : (low ? v <= lim : v >= lim);
+  const level = beyond(last.v, crit) ? 2 : beyond(last.v, warn) ? 1 : 0;
+  let slope = null;
+  const recent = pts.slice(-10);
+  if(recent.length >= 3){
+    const x0 = recent[0].t, n = recent.length;
+    const xs = recent.map(p => p.t - x0), ys = recent.map(p => p.v);
+    const mx = xs.reduce((a,b)=>a+b,0)/n, my = ys.reduce((a,b)=>a+b,0)/n;
+    const den = xs.reduce((s,x)=> s + (x-mx)*(x-mx), 0);
+    if(den > 0) slope = xs.reduce((s,x,i)=> s + (x-mx)*(ys[i]-my), 0) / den;
+  }
+  const limitUsed = crit !== null ? crit : warn;
+  let predicted = null, daysFromNow = null;
+  if(slope !== null && slope !== 0 && limitUsed !== null && !beyond(last.v, limitUsed)){
+    const towards = low ? slope < 0 : slope > 0;
+    if(towards){
+      const d = (limitUsed - last.v) / slope;
+      if(d >= 0 && isFinite(d)){
+        predicted = new Date((last.t + d) * 86400000);
+        daysFromNow = Math.max(0, (predicted.getTime() - Date.now()) / 86400000);
+      }
+    }
+  }
+  return { n:pts.length, last:last.v, lastDate:last.r.date, warn, crit, low, level, slope, limitUsed, predicted, daysFromNow };
+}
+
+function failureStats(eqId, wos){
+  const now = Date.now();
+  const fails = wos
+    .filter(w => w.equipment_id === eqId && w.opened_at && !/وقائ/.test(String(w.type || "")))
+    .map(w => ({ ...w, _t:new Date(w.opened_at).getTime() }))
+    .filter(w => isFinite(w._t))
+    .sort((a,b) => a._t - b._t);
+  const f90 = fails.filter(w => (now - w._t)/86400000 <= 90).length;
+  let mtbf = null;
+  if(fails.length >= 2){
+    const gaps = [];
+    for(let i=1;i<fails.length;i++) gaps.push((fails[i]._t - fails[i-1]._t)/86400000);
+    mtbf = gaps.reduce((a,b)=>a+b,0)/gaps.length;
+  }
+  const last = fails.length ? fails[fails.length-1] : null;
+  const sinceLast = last ? (now - last._t)/86400000 : null;
+  const nextExpected = (mtbf !== null && last) ? new Date(last._t + mtbf*86400000) : null;
+  const closed = fails.filter(w => w.closed_at && isFinite(new Date(w.closed_at).getTime()));
+  const mttr = closed.length ? closed.reduce((s,w) => s + (new Date(w.closed_at).getTime() - w._t)/3600000, 0)/closed.length : null;
+  const cats = {};
+  fails.forEach(w => { if(w.fault_category) cats[w.fault_category] = (cats[w.fault_category]||0) + 1; });
+  const topCat = Object.entries(cats).sort((a,b) => b[1]-a[1])[0] || null;
+  return { count:fails.length, f90, mtbf, sinceLast, lastDate: last ? last._t : null, nextExpected, mttr, topCat };
+}
+
+function riskScore(fs, ser, eq){
+  let score = 0; const reasons = []; const recs = [];
+  if(fs.f90 > 0){ score += Math.min(40, fs.f90*10); reasons.push(`${fs.f90} عطل خلال 90 يومًا`); }
+  if(fs.mtbf && fs.sinceLast !== null){
+    const ratio = fs.sinceLast / fs.mtbf;
+    if(ratio >= 1){ score += 30; reasons.push("تجاوز متوسط الفترة بين الأعطال"); recs.push("جدولة صيانة وقائية عاجلة وتجهيز قطع الغيار الحرجة"); }
+    else if(ratio >= 0.8){ score += 20; reasons.push("اقترب من موعد العطل المتوقع"); recs.push("جدولة فحص وقائي خلال أسبوع"); }
+  }
+  const worst = ser.reduce((m,s) => Math.max(m, s.level), 0);
+  if(worst === 2){ score += 30; reasons.push("قراءة حالة في المنطقة الحرجة"); recs.unshift("فحص فوري وإصدار أمر عمل تصحيحي"); }
+  else if(worst === 1){ score += 15; reasons.push("قراءة تجاوزت حد التحذير"); recs.push("زيادة وتيرة المراقبة"); }
+  const soon = ser.filter(s => s.daysFromNow !== null && s.daysFromNow <= 30);
+  if(soon.length){
+    score += 15;
+    const m = Math.min(...soon.map(s => s.daysFromNow));
+    reasons.push(`الاتجاه يشير لبلوغ الحد خلال ${Math.round(m)} يومًا`);
+    recs.push("التدخل قبل بلوغ الحد المتوقع");
+  }
+  const year = Number(eq.purchaseYear);
+  if(year > 1950){
+    const age = new Date().getFullYear() - year;
+    if(age >= 10){ score += 10; reasons.push(`عمر المعدة ${age} سنة`); }
+    else if(age >= 5){ score += 5; }
+  }
+  if(fs.topCat && fs.topCat[1] >= 3) recs.push(`تحليل السبب الجذري للعطل المتكرر (${fs.topCat[0]})`);
+  score = Math.min(100, score);
+  const level = score >= 60 ? "high" : score >= 30 ? "mid" : "low";
+  if(!recs.length) recs.push(score >= 30 ? "متابعة وزيادة وتيرة الفحص" : "الاستمرار على الجدول الوقائي الحالي");
+  return { score, level, reasons, recs, worst };
+}
+
 function uid(prefix){ return prefix + "-" + Math.random().toString(36).slice(2,9).toUpperCase(); }
 
 function distinctValues(list, key){
@@ -139,10 +340,18 @@ function distinctValues(list, key){
   return Array.from(s);
 }
 
+function escHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+function cellText(c, row){
+  const v = c.text ? c.text(row) : row[c.key];
+  return v === undefined || v === null ? "" : v;
+}
+
 function toCSV(columns, rows){
   const header = columns.map(c => '"' + String(c.label).replace(/"/g,'""') + '"').join(",");
   const lines = rows.map(row =>
-    columns.map(c => '"' + String(row[c.key] ?? "").replace(/"/g,'""') + '"').join(",")
+    columns.map(c => '"' + String(cellText(c,row)).replace(/"/g,'""') + '"').join(",")
   );
   return "﻿" + [header, ...lines].join("\r\n");
 }
@@ -159,13 +368,13 @@ function downloadCSV(filename, csvContent){
 function printTable(title, columns, rows){
   const win = window.open("", "_blank");
   if(!win) return;
-  const headRow = columns.map(c => `<th>${c.label}</th>`).join("");
+  const headRow = columns.map(c => `<th>${escHtml(c.label)}</th>`).join("");
   const bodyRows = rows.map(row =>
-    `<tr>${columns.map(c => `<td>${(row[c.key] ?? "")}</td>`).join("")}</tr>`
+    `<tr>${columns.map(c => `<td>${escHtml(cellText(c,row))}</td>`).join("")}</tr>`
   ).join("");
   win.document.write(`
     <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8">
-    <title>${title}</title>
+    <title>${escHtml(title)}</title>
     <style>
       body{ font-family:Tahoma,Arial,sans-serif; padding:20px; direction:rtl; }
       h2{ margin-bottom:4px; }
@@ -174,7 +383,7 @@ function printTable(title, columns, rows){
       th,td{ border:1px solid #999; padding:6px 8px; text-align:right; }
       th{ background:#eee; }
     </style></head><body>
-    <h2>${title}</h2>
+    <h2>${escHtml(title)}</h2>
     <div class="meta">تاريخ الطباعة: ${new Date().toLocaleString("en-US")} — عدد السجلات: ${rows.length}</div>
     <table><thead><tr>${headRow}</tr></thead><tbody>${bodyRows}</tbody></table>
     <script>window.onload = function(){ window.print(); }<\/script>
@@ -300,26 +509,48 @@ function ConfirmInline({ text, onYes, onNo }){
   );
 }
 
-function Dashboard({ equipmentCount, equipment, workorders, pmplans, purchaserequests, currentUser, sites, siteName }){
+function Dashboard({ equipmentCount, scrapCount, equipment, workorders, pmplans, purchaserequests, currentUser, sites, siteName, onGoto }){
   const rank = rankOf(currentUser);
   const openWO = workorders.filter(w => w.status !== "مكتمل").length;
-  const pendingPR = purchaserequests.filter(p => p.status !== "مكتمل" && p.status !== "تم التسليم").length;
+  const pendingPR = purchaserequests.filter(p => !PR_CLOSED.includes(p.status)).length;
+  const kpi = computeKPI(workorders);
 
-  const myEquipmentIds = new Set(
-    equipment.filter(e => String(e.site_id) === String(currentUser.site_id)).map(e => e.equipment_id)
-  );
-  const scopedWO = rank === 3 ? workorders : workorders.filter(w => myEquipmentIds.has(w.equipment_id));
-  const kpi = computeKPI(scopedWO);
+  const alerts = purchaserequests
+    .map(p => ({ p, level: prAlertLevel(p), info: prInfo(p) }))
+    .filter(a => a.level)
+    .sort((a,b) => a.info.daysLeft - b.info.daysLeft);
+  const expiredCount = alerts.filter(a => a.level === "expired").length;
 
   return (
     <div>
+      {alerts.length > 0 && (
+        <div className="card" style={{ borderColor: expiredCount ? "var(--err)" : "var(--accent)" }}>
+          <div className="topbar" style={{ marginBottom:6 }}>
+            <h3 style={{ margin:0 }}>⚠️ تنبيهات طلبات الشراء ({alerts.length})</h3>
+            <button className="btn-secondary" onClick={()=>onGoto("pr")}>فتح طلبات الشراء</button>
+          </div>
+          <div className="hint" style={{ marginBottom:6 }}>أقصى مدة للطلب 3 أشهر من تاريخ الطلب، وبعدها يُلغى. {expiredCount ? `منتهي: ${expiredCount}` : ""}</div>
+          {alerts.slice(0,10).map(({ p, level, info }) => (
+            <div className="alert-row" key={p.pr_id}>
+              <span><b>{p.part_name || "—"}</b>{p.po_number ? <span style={{ color:"var(--muted)" }}> (P.O {p.po_number})</span> : null}</span>
+              <span style={{ color:"var(--muted)" }}>{info.start}</span>
+              <span className={`badge ${level === "expired" ? "high" : "mid"}`}>
+                {level === "expired" ? `انتهت المدة منذ ${-info.daysLeft} يوم — يُلغى` : `تنتهي خلال ${info.daysLeft} يوم`}
+              </span>
+            </div>
+          ))}
+          {alerts.length > 10 && <div className="hint">و {alerts.length - 10} طلبات أخرى...</div>}
+        </div>
+      )}
+
       <div className="card">
         <h3>نظرة عامة</h3>
         <div>
           <span className="stat"><b>{equipmentCount}</b>معدات</span>
           <span className="stat"><b>{openWO}</b>أوامر عمل مفتوحة</span>
           <span className="stat"><b>{pmplans.length}</b>خطط صيانة وقائية</span>
-          <span className="stat"><b>{pendingPR}</b>طلبات قطع غيار معلقة</span>
+          <span className="stat"><b>{pendingPR}</b>طلبات شراء معلقة</span>
+          {scrapCount > 0 && <span className="stat"><b>{scrapCount}</b>معدات سكراب</span>}
         </div>
       </div>
 
@@ -333,7 +564,7 @@ function Dashboard({ equipmentCount, equipment, workorders, pmplans, purchasereq
         </div>
       </div>
 
-      {rank === 3 && sites.length > 0 && (
+      {rank >= 3 && sites.length > 0 && (
         <div className="card">
           <h3>مؤشرات الأداء حسب المحطة</h3>
           <div style={{ overflowX:"auto" }}>
@@ -350,7 +581,7 @@ function Dashboard({ equipmentCount, equipment, workorders, pmplans, purchasereq
                   return (
                     <tr key={s.site_id}>
                       <td>{siteName(s.site_id)}</td>
-                      <td>{siteEquip.length}</td>
+                      <td>{siteEquip.filter(e => e.status !== "سكراب").length}</td>
                       <td>{sKpi.total}</td>
                       <td>{sKpi.completionRate}%</td>
                       <td>{sKpi.avgDays !== null ? sKpi.avgDays : "—"}</td>
@@ -366,7 +597,7 @@ function Dashboard({ equipmentCount, equipment, workorders, pmplans, purchasereq
   );
 }
 
-function GenericTable({ title, items, columns, onAdd=()=>{}, onEdit=()=>{}, onDelete=()=>{}, canEdit, idField, canExport, dateField, resolveSite, sitePairs }){
+function GenericTable({ title, items, columns, onAdd=()=>{}, onEdit=()=>{}, onDelete=()=>{}, canEdit, idField, canExport, dateField, resolveSite, sitePairs, addLabel, extraActions }){
   const [confirmId,setConfirmId] = useState(null);
   const [q,setQ] = useState("");
   const [dateFrom,setDateFrom] = useState("");
@@ -374,7 +605,7 @@ function GenericTable({ title, items, columns, onAdd=()=>{}, onEdit=()=>{}, onDe
   const [siteFilter,setSiteFilter] = useState("");
 
   let filtered = q.trim()
-    ? items.filter(it => columns.some(c => String(it[c.key] ?? "").toLowerCase().includes(q.toLowerCase())))
+    ? items.filter(it => columns.some(c => String(cellText(c,it)).toLowerCase().includes(q.toLowerCase())))
     : items;
 
   if(dateField && dateFrom){
@@ -387,6 +618,7 @@ function GenericTable({ title, items, columns, onAdd=()=>{}, onEdit=()=>{}, onDe
     filtered = filtered.filter(it => String(resolveSite(it)) === String(siteFilter));
   }
 
+  const showActions = !!canEdit || !!extraActions;
   const doExport = () => downloadCSV(`${title}.csv`, toCSV(columns, filtered));
   const doPrint = () => printTable(title, columns, filtered);
 
@@ -394,7 +626,7 @@ function GenericTable({ title, items, columns, onAdd=()=>{}, onEdit=()=>{}, onDe
     <div className="card">
       <div className="topbar">
         <h3>{title} ({items.length})</h3>
-        {canEdit && <button className="btn-secondary" onClick={onAdd}><IconPlus size={13}/> إضافة</button>}
+        {canEdit && <button className="btn-secondary" onClick={onAdd}><IconPlus size={13}/> {addLabel || "إضافة"}</button>}
       </div>
       <div className="search-box">
         <input placeholder="بحث..." value={q} onChange={e=>setQ(e.target.value)} />
@@ -432,23 +664,24 @@ function GenericTable({ title, items, columns, onAdd=()=>{}, onEdit=()=>{}, onDe
         <table>
           <thead><tr>
             {columns.map(c => <th key={c.key}>{c.label}</th>)}
-            {canEdit && <th>إجراءات</th>}
+            {showActions && <th>إجراءات</th>}
           </tr></thead>
           <tbody>
             {filtered.map(item => (
               <tr key={item[idField]}>
                 {columns.map(c => <td key={c.key}>{c.render ? c.render(item) : String(item[c.key] ?? "")}</td>)}
-                {canEdit && (
+                {showActions && (
                   <td>
                     <div className="row-actions">
-                      <button className="icon-btn" onClick={()=>onEdit(item)}>تعديل</button>
-                      <button className="btn-danger" onClick={()=>setConfirmId(item[idField])}>حذف</button>
+                      {extraActions && extraActions(item)}
+                      {canEdit && <button className="icon-btn" onClick={()=>onEdit(item)}>تعديل</button>}
+                      {canEdit && <button className="btn-danger" onClick={()=>setConfirmId(item[idField])}>حذف</button>}
                     </div>
                   </td>
                 )}
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={columns.length+1} style={{ textAlign:"center", color:"var(--muted)" }}>لا توجد بيانات</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={columns.length + (showActions ? 1 : 0)} style={{ textAlign:"center", color:"var(--muted)" }}>لا توجد بيانات</td></tr>}
           </tbody>
         </table>
       </div>
@@ -459,7 +692,29 @@ function GenericTable({ title, items, columns, onAdd=()=>{}, onEdit=()=>{}, onDe
   );
 }
 
-function EditModal({ title, fields, values, onChange, onSave, onClose }){
+// حقل بحث + قائمة منسدلة: اكتب حرفًا لتصفية القائمة ثم اختر منها
+function SearchSelect({ value, options, onChange, fallbackLabel }){
+  const [q,setQ] = useState("");
+  const qq = q.trim().toLowerCase();
+  const filtered = qq
+    ? options.filter(o => String(o.label).toLowerCase().includes(qq) || String(o.value).toLowerCase().includes(qq))
+    : options;
+  const known = options.some(o => String(o.value) === String(value));
+  return (
+    <div>
+      <input placeholder="اكتب للبحث..." value={q} onChange={e=>setQ(e.target.value)} />
+      <select value={value || ""} onChange={e=>onChange(e.target.value)}
+        size={qq ? Math.min(6, Math.max(2, filtered.length + 1)) : 1} style={{ marginTop:6 }}>
+        <option value="">— اختر —</option>
+        {value && !known && <option value={value}>{fallbackLabel ? fallbackLabel(value) : value}</option>}
+        {filtered.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      {qq && filtered.length === 0 && <div className="hint">لا توجد نتائج مطابقة</div>}
+    </div>
+  );
+}
+
+function EditModal({ title, fields, values, onChange, onSave, onClose, error }){
   return (
     <div className="modal-bg" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
@@ -475,6 +730,11 @@ function EditModal({ title, fields, values, onChange, onSave, onClose }){
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
+            )}
+
+            {f.type === "search" && (
+              <SearchSelect value={values[f.key] || ""} options={f.optionPairs || []} fallbackLabel={f.fallbackLabel}
+                onChange={v=>onChange(f.key, v)} />
             )}
 
             {f.type === "combo" && (
@@ -510,82 +770,415 @@ function EditModal({ title, fields, values, onChange, onSave, onClose }){
             {(!f.type || f.type === "text" || f.type === "number" || f.type === "date") && (
               <input type={f.type || "text"} value={values[f.key] || ""} onChange={e=>onChange(f.key, e.target.value)} />
             )}
+
+            {f.extra && f.extra(values)}
           </div>
         ))}
+        {error && <p className="error">{error}</p>}
         <button type="button" className="btn" onClick={onSave}>حفظ</button>
       </div>
     </div>
   );
 }
 
-function SectionTable({ title, storageKey, idField, idPrefix, data, setData, canEdit, fieldsDef, columns, defaultsOnAdd, currentUser, onLog, canExport, dateField, resolveSite, sitePairs, onBeforeSave }){
+function SectionTable({ title, storageKey, idField, idPrefix, data, setData, canEdit, fieldsDef, columns, defaultsOnAdd, currentUser, onLog, canExport, dateField, resolveSite, sitePairs, onBeforeSave, onAfterSave, viewFilter, extraActions, prefill, onPrefillUsed, validate, addLabel }){
   const [modal,setModal] = useState(null);
+  const [err,setErr] = useState("");
+
+  useEffect(() => {
+    if(prefill){ setErr(""); setModal(prefill); if(onPrefillUsed) onPrefillUsed(); }
+  }, [prefill]);
+
+  // العرض يُفلتر حسب المحطة، أما الحفظ فيتم دائمًا على القائمة الكاملة
+  const items = viewFilter ? data.filter(viewFilter) : data;
+
+  const getDefaults = () => typeof defaultsOnAdd === "function" ? defaultsOnAdd() : (defaultsOnAdd || {});
 
   const save = async () => {
-    let record = { ...modal };
-    const isNew = !record[idField];
-    if(isNew){
-      const defaults = typeof defaultsOnAdd === "function" ? defaultsOnAdd() : (defaultsOnAdd || {});
-      record = { ...defaults, ...record, [idField]: uid(idPrefix) };
-    }
-    if(typeof onBeforeSave === "function"){ record = onBeforeSave(record) || record; }
-    record.last_modified_by = currentUser.full_name;
-    record.last_modified_at = new Date().toISOString();
+    setErr("");
+    if(validate){ const m = validate(modal); if(m){ setErr(m); return; } }
+    try{
+      let record = { ...modal };
+      const isNew = !record[idField];
+      if(isNew){ record = { ...getDefaults(), ...record, [idField]: uid(idPrefix) }; }
+      if(typeof onBeforeSave === "function"){ record = onBeforeSave(record, isNew) || record; }
+      record.last_modified_by = currentUser.full_name;
+      record.last_modified_at = new Date().toISOString();
 
-    let next;
-    if(!isNew){ next = data.map(d => d[idField] === record[idField] ? record : d); }
-    else { next = [...data, record]; }
-    setData(next);
-    await saveList(storageKey, next);
-    if(onLog) onLog(isNew ? "إضافة" : "تعديل", storageKey, record[idField]);
-    setModal(null);
+      const next = isNew ? [...data, record] : data.map(d => d[idField] === record[idField] ? record : d);
+      await saveList(storageKey, next);
+      setData(next);
+      if(onLog) onLog(isNew ? "إضافة" : "تعديل", storageKey, record[idField]);
+      if(onAfterSave) await onAfterSave(record, isNew);
+      setModal(null);
+    }catch(e){
+      setErr("تعذر الحفظ: " + (e && e.message ? e.message : String(e)));
+    }
   };
   const del = async (id) => {
-    const next = data.filter(d => d[idField] !== id);
-    setData(next);
-    await saveList(storageKey, next);
-    if(onLog) onLog("حذف", storageKey, id);
+    try{
+      const next = data.filter(d => d[idField] !== id);
+      await saveList(storageKey, next);
+      setData(next);
+      if(onLog) onLog("حذف", storageKey, id);
+    }catch(e){
+      alert("تعذر الحذف: " + (e && e.message ? e.message : String(e)));
+    }
   };
 
   return (
     <div>
-      <GenericTable title={title} items={data} columns={columns} canEdit={canEdit} idField={idField}
+      <GenericTable title={title} items={items} columns={columns} canEdit={canEdit} idField={idField}
         canExport={canExport} dateField={dateField} resolveSite={resolveSite} sitePairs={sitePairs}
-        onAdd={()=>setModal(Object.fromEntries(fieldsDef.map(f=>[f.key,""])))}
-        onEdit={(item)=>setModal(item)} onDelete={del} />
+        addLabel={addLabel} extraActions={extraActions}
+        onAdd={()=>{ setErr(""); setModal({ ...Object.fromEntries(fieldsDef.map(f=>[f.key,""])), ...getDefaults() }); }}
+        onEdit={(item)=>{ setErr(""); setModal(item); }} onDelete={del} />
       {modal && (
-        <EditModal title={modal[idField] ? "تعديل" : "إضافة"} fields={fieldsDef}
-          values={modal} onChange={(k,v)=>setModal({...modal,[k]:v})} onSave={save} onClose={()=>setModal(null)} />
+        <EditModal title={modal[idField] ? "تعديل" : "إضافة"} fields={fieldsDef} error={err}
+          values={modal} onChange={(k,v)=>setModal({...modal,[k]:v})} onSave={save} onClose={()=>{ setModal(null); setErr(""); }} />
       )}
     </div>
   );
 }
 
-function Reports({ equipment, workorders, pmplans, purchaserequests, transfers, users, spareparts, canExportPrint }){
+// ---- نافذة فاتورة واحدة بعدة قطع ----
+function InvoiceModal({ onClose, onSave, equipmentOptionPairs, eqText, partNames, brands, countries, sitePairs, showSite, defaultSite }){
+  const blankLine = () => ({ part_name:"", part_no:"", qty:"", price:"", brand:"", country:"", equipment_id:"" });
+  const [inv,setInv] = useState({ invoice_no:"", supplier:"", date:todayStr(), image:"", site_id:defaultSite || "" });
+  const [lines,setLines] = useState([blankLine()]);
+  const [err,setErr] = useState("");
+  const [busy,setBusy] = useState(false);
+
+  const setLine = (i,k,v) => setLines(lines.map((l,idx) => idx === i ? { ...l, [k]:v } : l));
+  const total = lines.reduce((s,l) => s + (Number(l.qty)||0) * (Number(l.price)||0), 0);
+
+  const submit = async () => {
+    setErr("");
+    if(!inv.invoice_no.trim()){ setErr("أدخل رقم الفاتورة"); return; }
+    for(let i=0;i<lines.length;i++){
+      const l = lines[i];
+      const touched = String(l.part_name).trim() || String(l.qty).trim() || String(l.price).trim();
+      if(touched && (!String(l.part_name).trim() || !(Number(l.qty) > 0))){
+        setErr(`القطعة رقم ${i+1}: الاسم والعدد (أكبر من صفر) مطلوبان`); return;
+      }
+    }
+    const valid = lines.filter(l => String(l.part_name).trim());
+    if(!valid.length){ setErr("أضف قطعة واحدة على الأقل"); return; }
+    setBusy(true);
+    try{
+      await onSave(inv, valid);
+      onClose();
+    }catch(e){
+      setErr("تعذر الحفظ: " + (e && e.message ? e.message : String(e)));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal wide" onClick={e=>e.stopPropagation()}>
+        <div className="topbar"><h3>🧾 فاتورة بعدة قطع</h3><button className="icon-btn" onClick={onClose}><IconX size={14}/></button></div>
+
+        <div className="grid2">
+          <div className="field"><label>رقم الفاتورة</label>
+            <input value={inv.invoice_no} onChange={e=>setInv({ ...inv, invoice_no:e.target.value })} /></div>
+          <div className="field"><label>المورّد</label>
+            <input value={inv.supplier} onChange={e=>setInv({ ...inv, supplier:e.target.value })} /></div>
+          <div className="field"><label>تاريخ الفاتورة / الاستلام</label>
+            <input type="date" value={inv.date} onChange={e=>setInv({ ...inv, date:e.target.value })} /></div>
+          {showSite && (
+            <div className="field"><label>المحطة</label>
+              <select value={inv.site_id} onChange={e=>setInv({ ...inv, site_id:e.target.value })}>
+                <option value="">اختر</option>
+                {sitePairs.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select></div>
+          )}
+        </div>
+        <div className="field"><label>صورة الفاتورة (مرة واحدة للفاتورة كلها)</label>
+          {inv.image && <img src={inv.image} className="thumb" style={{ marginBottom:6, width:80, height:80 }} />}
+          <input type="file" accept="image/*" onChange={async e=>{
+            const file = e.target.files[0]; if(!file) return;
+            const dataUrl = await compressImage(file);
+            setInv({ ...inv, image:dataUrl });
+          }} />
+        </div>
+
+        <datalist id="inv-parts">{partNames.map(n => <option key={n} value={n} />)}</datalist>
+        <datalist id="inv-brands">{brands.map(n => <option key={n} value={n} />)}</datalist>
+        <datalist id="inv-countries">{countries.map(n => <option key={n} value={n} />)}</datalist>
+
+        <h4 style={{ margin:"6px 0 8px" }}>قطع الفاتورة ({lines.length})</h4>
+        {lines.map((l,i) => (
+          <div className="line-box" key={i}>
+            <div className="topbar" style={{ marginBottom:6 }}>
+              <b style={{ fontSize:13 }}>قطعة {i+1}</b>
+              {lines.length > 1 && <button className="icon-btn" onClick={()=>setLines(lines.filter((_,idx)=>idx!==i))}>حذف السطر</button>}
+            </div>
+            <div className="grid2">
+              <div className="field"><label>اسم القطعة</label>
+                <input list="inv-parts" value={l.part_name} onChange={e=>setLine(i,"part_name",e.target.value)} /></div>
+              <div className="field"><label>رقم القطعة</label>
+                <input value={l.part_no} onChange={e=>setLine(i,"part_no",e.target.value)} /></div>
+              <div className="field"><label>العدد</label>
+                <input type="number" min="0" value={l.qty} onChange={e=>setLine(i,"qty",e.target.value)} /></div>
+              <div className="field"><label>سعر الوحدة</label>
+                <input type="number" min="0" value={l.price} onChange={e=>setLine(i,"price",e.target.value)} /></div>
+              <div className="field"><label>الماركة</label>
+                <input list="inv-brands" value={l.brand} onChange={e=>setLine(i,"brand",e.target.value)} /></div>
+              <div className="field"><label>بلد الصنع</label>
+                <input list="inv-countries" value={l.country} onChange={e=>setLine(i,"country",e.target.value)} /></div>
+            </div>
+            <div className="field" style={{ marginBottom:0 }}><label>المعدة المرتبطة (اختياري)</label>
+              <SearchSelect value={l.equipment_id} options={equipmentOptionPairs} fallbackLabel={eqText}
+                onChange={v=>setLine(i,"equipment_id",v)} /></div>
+          </div>
+        ))}
+        <button type="button" className="btn-secondary" style={{ marginBottom:12 }} onClick={()=>setLines([...lines, blankLine()])}>
+          <IconPlus size={13}/> إضافة قطعة أخرى لنفس الفاتورة
+        </button>
+        <div className="hint" style={{ marginBottom:10 }}>إجمالي الفاتورة (العدد × السعر): <b>{total.toLocaleString("en-US")}</b></div>
+        {err && <p className="error">{err}</p>}
+        <button type="button" className="btn" onClick={submit} disabled={busy}>{busy ? "جارٍ الحفظ..." : "حفظ الفاتورة وكل القطع"}</button>
+      </div>
+    </div>
+  );
+}
+
+// ---- صفحة القطعة في الكتالوج ----
+function CatalogModal({ part, onClose, onReorder, canEdit, eqText, invoiceMap }){
+  const reqs = [...part.requests].sort((a,b) => String(b.request_date||"").localeCompare(String(a.request_date||"")));
+  const buys = [...part.purchases].sort((a,b) => String(b.received_date||"").localeCompare(String(a.received_date||"")));
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal wide" onClick={e=>e.stopPropagation()}>
+        <div className="topbar"><h3>📚 {part.part_name}</h3><button className="icon-btn" onClick={onClose}><IconX size={14}/></button></div>
+        <div className="grid3">
+          <div className="info"><span>رقم القطعة</span>{part.part_no || "—"}</div>
+          <div className="info"><span>الماركة</span>{part.brand || "—"}</div>
+          <div className="info"><span>بلد الصنع</span>{part.country || "—"}</div>
+          <div className="info"><span>آخر سعر للوحدة</span>{part.last_price !== null ? Number(part.last_price).toLocaleString("en-US") : "—"}</div>
+          <div className="info"><span>إجمالي المشتريات (عدد)</span>{part.total_qty}</div>
+          <div className="info"><span>عدد الطلبات</span>{part.request_count}</div>
+        </div>
+        <div className="info" style={{ marginBottom:12 }}><span>المعدات المرتبطة</span>{part.equipment.length ? part.equipment.map(eqText).join("، ") : "—"}</div>
+
+        <h4 style={{ margin:"8px 0" }}>سجل الطلبات ({reqs.length})</h4>
+        <div style={{ overflowX:"auto", marginBottom:12 }}>
+          <table>
+            <thead><tr><th>التاريخ</th><th>P.O</th><th>الكمية</th><th>الأولوية</th><th>الحالة</th></tr></thead>
+            <tbody>
+              {reqs.map(r => <tr key={r.pr_id}><td>{r.request_date || "—"}</td><td>{r.po_number || "—"}</td><td>{r.quantity || "—"}</td><td>{r.priority || "—"}</td><td>{r.status || "—"}</td></tr>)}
+              {reqs.length === 0 && <tr><td colSpan="5" style={{ textAlign:"center", color:"var(--muted)" }}>لا توجد طلبات</td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        <h4 style={{ margin:"8px 0" }}>سجل الشراء والاستلام ({buys.length})</h4>
+        <div style={{ overflowX:"auto", marginBottom:14 }}>
+          <table>
+            <thead><tr><th>التاريخ</th><th>العدد</th><th>سعر الوحدة</th><th>الفاتورة</th><th>الماركة</th></tr></thead>
+            <tbody>
+              {buys.map(p => {
+                const inv = invoiceMap[p.invoice_id];
+                return <tr key={p.part_id}><td>{p.received_date || (inv && inv.date) || "—"}</td><td>{p.qty || "—"}</td><td>{p.price || "—"}</td><td>{inv ? (inv.invoice_no || inv.invoice_id) : "—"}</td><td>{p.brand || "—"}</td></tr>;
+              })}
+              {buys.length === 0 && <tr><td colSpan="5" style={{ textAlign:"center", color:"var(--muted)" }}>لا توجد مشتريات مسجلة</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        {canEdit && <button type="button" className="btn" onClick={()=>onReorder(part)}>🛒 طلب هذه القطعة مرة أخرى</button>}
+      </div>
+    </div>
+  );
+}
+
+// ---- الصيانة التنبؤية ----
+function Predictive({ equipment, workorders, readings, setReadings, canEdit, currentUser, onLog, equipmentOptionPairs, eqText, inScope }){
+  const [sub,setSub] = useState("risk");
+  const eqList = equipment.filter(e => e.status !== "سكراب");
+  const scopedReadings = readings.filter(inScope);
+
+  const seriesMap = {};
+  scopedReadings.forEach(r => {
+    if(!r.equipment_id || !r.parameter) return;
+    const k = r.equipment_id + "||" + r.parameter;
+    (seriesMap[k] = seriesMap[k] || []).push(r);
+  });
+  const seriesList = Object.entries(seriesMap).map(([k,rs]) => {
+    const a = analyzeSeries(rs);
+    if(!a) return null;
+    const idx = k.indexOf("||");
+    return { eid:k.slice(0,idx), param:k.slice(idx+2), ...a };
+  }).filter(Boolean);
+
+  const rows = eqList.map(e => {
+    const fs = failureStats(e.equipment_id, workorders);
+    const ser = seriesList.filter(s => s.eid === e.equipment_id);
+    const risk = riskScore(fs, ser, e);
+    const hasData = fs.count > 0 || ser.length > 0;
+    return { e, fs, ser, risk, hasData };
+  }).sort((a,b) => b.risk.score - a.risk.score);
+
+  const highCount = rows.filter(r => r.risk.level === "high").length;
+  const alertCount = seriesList.filter(s => s.level > 0).length;
+  const soonCount = rows.filter(r => (r.fs.nextExpected && (r.fs.nextExpected.getTime() - Date.now())/86400000 <= 30) || r.ser.some(s => s.daysFromNow !== null && s.daysFromNow <= 30)).length;
+  const noData = rows.filter(r => !r.hasData).length;
+
+  const levelBadge = (lvl) => lvl === 2 ? <span className="badge high">خطر</span> : lvl === 1 ? <span className="badge mid">تحذير</span> : <span className="badge low">طبيعي</span>;
+
+  return (
+    <div>
+      <div className="tabs">
+        <button className={`tab ${sub==="risk"?"active":""}`} onClick={()=>setSub("risk")}>تقييم المخاطر</button>
+        <button className={`tab ${sub==="trend"?"active":""}`} onClick={()=>setSub("trend")}>اتجاه القراءات والتنبؤ</button>
+        <button className={`tab ${sub==="readings"?"active":""}`} onClick={()=>setSub("readings")}>قراءات الحالة (إدخال)</button>
+      </div>
+
+      {sub === "risk" && (
+        <div>
+          <div className="card">
+            <h3>الصيانة التنبؤية — ملخص</h3>
+            <div>
+              <span className="stat"><b style={{ color:"var(--err)" }}>{highCount}</b>معدات عالية الخطر</span>
+              <span className="stat"><b>{alertCount}</b>قراءات في التحذير/الخطر</span>
+              <span className="stat"><b>{soonCount}</b>عطل متوقع خلال 30 يومًا</span>
+              <span className="stat"><b style={{ color:"var(--muted)" }}>{noData}</b>معدات بلا بيانات كافية</span>
+            </div>
+            <p className="hint" style={{ marginTop:8 }}>
+              يعتمد التقييم على سجل الأعطال (أوامر العمل غير الوقائية): عدد الأعطال خلال 90 يومًا، متوسط الفترة بين الأعطال MTBF (بالأيام التقويمية)،
+              متوسط زمن الإصلاح MTTR (بالساعات)، وعلى قراءات الحالة واتجاهها وعمر المعدة. تزداد الدقة كلما زادت البيانات المسجلة.
+            </p>
+          </div>
+
+          <div className="card">
+            <h3>ترتيب المعدات حسب درجة الخطر</h3>
+            <div style={{ overflowX:"auto" }}>
+              <table>
+                <thead><tr>
+                  <th>المعدة</th><th>الخطر</th><th>أعطال 90 يوم</th><th>MTBF (يوم)</th><th>MTTR (ساعة)</th>
+                  <th>آخر عطل</th><th>العطل المتوقع</th><th>أسباب التقييم</th><th>التوصية</th>
+                </tr></thead>
+                <tbody>
+                  {rows.map(({ e, fs, risk, hasData }) => (
+                    <tr key={e.equipment_id}>
+                      <td>{eqText(e.equipment_id)}{e.desc ? <div className="hint">{e.desc}</div> : null}</td>
+                      <td>{hasData ? <span className={`badge ${risk.level}`}>{LEVEL_LABEL[risk.level]} ({risk.score})</span> : <span style={{ color:"var(--muted)" }}>لا بيانات</span>}</td>
+                      <td>{fs.f90}</td>
+                      <td>{fs.mtbf !== null ? fs.mtbf.toFixed(0) : "—"}</td>
+                      <td>{fs.mttr !== null ? fs.mttr.toFixed(1) : "—"}</td>
+                      <td>{fs.lastDate ? fmtDate(fs.lastDate) : "—"}</td>
+                      <td>{fs.nextExpected ? fmtDate(fs.nextExpected) : "—"}</td>
+                      <td style={{ fontSize:12 }}>{risk.reasons.length ? risk.reasons.join("، ") : "—"}</td>
+                      <td style={{ fontSize:12 }}>{hasData ? risk.recs.join("؛ ") : "سجّل أوامر عمل وقراءات حالة لبدء التحليل"}</td>
+                    </tr>
+                  ))}
+                  {rows.length === 0 && <tr><td colSpan="9" style={{ textAlign:"center", color:"var(--muted)" }}>لا توجد معدات</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sub === "trend" && (
+        <div className="card">
+          <h3>اتجاه القراءات والتنبؤ ببلوغ الحدود</h3>
+          <p className="hint" style={{ marginBottom:8 }}>التنبؤ بالانحدار الخطي لآخر 10 قراءات (يتطلب 3 قراءات على الأقل مع تحديد حد الخطر أو التحذير).</p>
+          <div style={{ overflowX:"auto" }}>
+            <table>
+              <thead><tr>
+                <th>المعدة</th><th>المؤشر</th><th>آخر قيمة</th><th>تاريخها</th><th>حد التحذير</th><th>حد الخطر</th><th>الحالة</th><th>الاتجاه (لكل 30 يوم)</th><th>بلوغ الحد المتوقع</th>
+              </tr></thead>
+              <tbody>
+                {[...seriesList].sort((a,b) => (b.level - a.level) || ((a.daysFromNow ?? 1e9) - (b.daysFromNow ?? 1e9))).map(s => (
+                  <tr key={s.eid + s.param}>
+                    <td>{eqText(s.eid)}</td>
+                    <td>{s.param}</td>
+                    <td>{s.last}</td>
+                    <td>{fmtDate(s.lastDate)}</td>
+                    <td>{s.warn !== null ? s.warn : "—"}</td>
+                    <td>{s.crit !== null ? s.crit : "—"}</td>
+                    <td>{levelBadge(s.level)}</td>
+                    <td>{s.slope === null ? "—" : (s.slope*30 > 0 ? "▲ " : s.slope*30 < 0 ? "▼ " : "● ") + Math.abs(s.slope*30).toFixed(2)}</td>
+                    <td>{s.predicted ? `${fmtDate(s.predicted)} (بعد ${Math.round(s.daysFromNow)} يوم)` : "—"}</td>
+                  </tr>
+                ))}
+                {seriesList.length === 0 && <tr><td colSpan="9" style={{ textAlign:"center", color:"var(--muted)" }}>لا توجد قراءات — أضفها من تبويب "قراءات الحالة"</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {sub === "readings" && (
+        <SectionTable title="قراءات الحالة" storageKey="readings" idField="reading_id" idPrefix="RD"
+          data={readings} setData={setReadings} viewFilter={inScope} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          dateField="date"
+          defaultsOnAdd={() => ({ date: todayStr(), direction:"high" })}
+          validate={(m) => {
+            if(!m.equipment_id) return "اختر المعدة";
+            if(!m.parameter || !String(m.parameter).trim()) return "اختر أو اكتب المؤشر";
+            if(numOrNull(m.value) === null) return "أدخل قيمة القراءة";
+            if(!m.date) return "أدخل التاريخ";
+            return "";
+          }}
+          columns={[
+            { key:"date", label:"التاريخ" },
+            { key:"equipment_id", label:"المعدة", render:r=>eqText(r.equipment_id), text:r=>eqText(r.equipment_id) },
+            { key:"parameter", label:"المؤشر" },
+            { key:"value", label:"القيمة" },
+            { key:"warn_limit", label:"حد التحذير" },
+            { key:"crit_limit", label:"حد الخطر" },
+            { key:"direction", label:"اتجاه الخطر", render:r=> r.direction === "low" ? "انخفاض" : "ارتفاع", text:r=> r.direction === "low" ? "انخفاض" : "ارتفاع" },
+          ]}
+          fieldsDef={[
+            { key:"equipment_id", label:"المعدة", type:"search", optionPairs:equipmentOptionPairs, fallbackLabel:eqText },
+            { key:"date", label:"تاريخ القراءة", type:"date" },
+            { key:"parameter", label:"المؤشر", type:"combo", options:Array.from(new Set([...READING_PARAMS, ...distinctValues(readings,"parameter")])) },
+            { key:"value", label:"القيمة", type:"number" },
+            { key:"warn_limit", label:"حد التحذير (اختياري)", type:"number" },
+            { key:"crit_limit", label:"حد الخطر (اختياري)", type:"number" },
+            { key:"direction", label:"اتجاه الخطر", type:"select", optionPairs:DIR_PAIRS },
+            { key:"notes", label:"ملاحظات" },
+          ]}
+        />
+      )}
+    </div>
+  );
+}
+
+function Reports({ equipment, workorders, pmplans, purchaserequests, transfers, users, spareparts, accessories, readings, invoices, sites, canExportPrint, isManager, eqText, siteName }){
   const [copied,setCopied] = useState("");
   const exportAll = () => {
-    const payload = { equipment, workorders, pmplans, purchaserequests, transfers, users, spareparts };
+    const payload = { equipment, workorders, pmplans, purchaserequests, transfers, users, spareparts, accessories, readings, invoices, sites };
     const json = JSON.stringify(payload);
     navigator.clipboard.writeText(json).then(()=> setCopied("تم نسخ نسخة كاملة من البيانات ✓")).catch(()=> setCopied("تعذر النسخ التلقائي"));
   };
 
+  const eqC = (key) => ({ key, label:"المعدة", text:r=>eqText(r[key]) });
+  const siteC = (key, label) => ({ key, label, text:r=>siteName(r[key]) });
+
   const SECTIONS = [
-    { title:"المعدات", data:equipment, columns:[{key:"name",label:"الرمز"},{key:"desc",label:"الوصف"},{key:"type",label:"النوع"},{key:"status",label:"الحالة"},{key:"site_id",label:"الموقع"}] },
-    { title:"أوامر العمل", data:workorders, columns:[{key:"wo_id",label:"الرقم"},{key:"equipment_id",label:"المعدة"},{key:"fault_category",label:"تصنيف العطل"},{key:"description",label:"الوصف"},{key:"status",label:"الحالة"},{key:"opened_at",label:"تاريخ الفتح"},{key:"closed_at",label:"تاريخ الإغلاق"}] },
-    { title:"الصيانة الوقائية", data:pmplans, columns:[{key:"pm_id",label:"الرقم"},{key:"equipment_id",label:"المعدة"},{key:"notes",label:"ملاحظات"}] },
-    { title:"طلبات قطع الغيار", data:purchaserequests, columns:[{key:"pr_id",label:"الرقم"},{key:"part_name",label:"الصنف"},{key:"quantity",label:"الكمية"},{key:"status",label:"الحالة"},{key:"equipment_id",label:"المعدة"},{key:"request_date",label:"التاريخ"}] },
-    { title:"قطع الغيار", data:spareparts, columns:[{key:"part_name",label:"اسم القطعة"},{key:"price",label:"السعر"},{key:"brand",label:"الماركة"},{key:"country",label:"بلد الصنع"},{key:"equipment_id",label:"المعدة"},{key:"received_date",label:"التاريخ"}] },
-    { title:"النقل", data:transfers, columns:[{key:"equipment_id",label:"المعدة"},{key:"to_site_id",label:"إلى موقع"},{key:"reason",label:"السبب"}] },
+    { title:"المعدات", data:equipment, columns:[{key:"name",label:"الرمز"},{key:"desc",label:"الوصف"},{key:"type",label:"النوع"},{key:"status",label:"الحالة"},siteC("site_id","الموقع")] },
+    { title:"أوامر العمل", data:workorders, columns:[{key:"wo_id",label:"الرقم"},eqC("equipment_id"),{key:"fault_category",label:"تصنيف العطل",text:r=>faultText(r.fault_category)},{key:"description",label:"الوصف"},{key:"status",label:"الحالة"},{key:"opened_at",label:"تاريخ الفتح"},{key:"closed_at",label:"تاريخ الإغلاق"}] },
+    { title:"الصيانة الوقائية", data:pmplans, columns:[{key:"pm_id",label:"الرقم"},eqC("equipment_id"),{key:"notes",label:"ملاحظات"}] },
+    { title:"طلبات الشراء", data:purchaserequests, columns:[{key:"pr_id",label:"الرقم"},{key:"po_number",label:"P.O"},{key:"part_name",label:"الصنف"},{key:"quantity",label:"الكمية"},{key:"priority",label:"الأولوية"},{key:"status",label:"الحالة"},eqC("equipment_id"),{key:"request_date",label:"تاريخ الطلب"}] },
+    { title:"قطع الغيار", data:spareparts, columns:[{key:"part_name",label:"اسم القطعة"},{key:"part_no",label:"رقم القطعة"},{key:"qty",label:"العدد"},{key:"price",label:"سعر الوحدة"},{key:"brand",label:"الماركة"},{key:"country",label:"بلد الصنع"},eqC("equipment_id"),{key:"received_date",label:"التاريخ"}] },
+    { title:"الملحقات", data:accessories, columns:[{key:"name",label:"الملحق"},{key:"serial",label:"الرقم التسلسلي"},eqC("equipment_id"),siteC("site_id","المحطة"),{key:"status",label:"الحالة"}] },
+    { title:"النقل", data:transfers, columns:[eqC("equipment_id"),siteC("from_site_id","من محطة"),siteC("to_site_id","إلى محطة"),{key:"transfer_date",label:"التاريخ"},{key:"reason",label:"السبب"}] },
+    { title:"قراءات الحالة", data:readings, columns:[{key:"date",label:"التاريخ"},eqC("equipment_id"),{key:"parameter",label:"المؤشر"},{key:"value",label:"القيمة"},{key:"warn_limit",label:"حد التحذير"},{key:"crit_limit",label:"حد الخطر"}] },
   ];
 
   return (
     <div>
-      <div className="card">
-        <h3>نسخة احتياطية كاملة</h3>
-        <button className="btn-secondary" onClick={exportAll}><IconCopy size={13}/> تصدير نسخة كاملة (نسخ للحافظة)</button>
-        {copied && <p className="ok-msg">{copied}</p>}
-        <p style={{ color:"var(--muted)", fontSize:13 }}>احتفظ بهذه النسخة أسبوعيًا كخط رجعة إضافي.</p>
-      </div>
+      {isManager && (
+        <div className="card">
+          <h3>نسخة احتياطية كاملة</h3>
+          <button className="btn-secondary" onClick={exportAll}><IconCopy size={13}/> تصدير نسخة كاملة (نسخ للحافظة)</button>
+          {copied && <p className="ok-msg">{copied}</p>}
+          <p style={{ color:"var(--muted)", fontSize:13 }}>احتفظ بهذه النسخة أسبوعيًا كخط رجعة إضافي.</p>
+        </div>
+      )}
 
       {canExportPrint && (
         <div className="card">
@@ -618,25 +1211,34 @@ function App(){
   const [spareparts,setSpareparts] = useState([]);
   const [sites,setSites] = useState([]);
   const [activitylog,setActivitylog] = useState([]);
+  const [invoices,setInvoices] = useState([]);
+  const [accessories,setAccessories] = useState([]);
+  const [readings,setReadings] = useState([]);
   const [currentUser,setCurrentUser] = useState(null);
   const [tab,setTab] = useState("dashboard");
   const [loading,setLoading] = useState(true);
   const [loadErr,setLoadErr] = useState("");
+  const [prPrefill,setPrPrefill] = useState(null);
+  const [catalogView,setCatalogView] = useState(null);
+  const [invoiceOpen,setInvoiceOpen] = useState(false);
+  const [viewImage,setViewImage] = useState(null);
 
   useEffect(() => {
     (async () => {
       try{
-        const [u,e,w,p,pr,t,s,sp,log] = await Promise.all([
+        const [u,e,w,p,pr,t,s,sp,log,inv,acc,rd] = await Promise.all([
           loadList("users"), loadList("equipment"), loadList("workorders"),
           loadList("pmplans"), loadList("purchaserequests"), loadList("transfers"),
           loadList("sites"), loadList("spareparts"), loadList("activitylog"),
+          loadList("invoices"), loadList("accessories"), loadList("readings"),
         ]);
-        setUsers(u.length ? u : [{ user_id:"admin", username:"admin", password:"admin123", full_name:"مدير النظام", role_name:"مدير الصيانة" }]);
+        setUsers(u.length ? u : [{ user_id:"admin", username:"admin", password:"admin123", full_name:"مدير النظام", role_name:"أدمن" }]);
         setEquipment(e); setWorkorders(w); setPmplans(p); setPurchaserequests(pr);
         setTransfers(t); setSites(s); setSpareparts(sp); setActivitylog(log);
+        setInvoices(inv); setAccessories(acc); setReadings(rd);
       }catch(err){
         setLoadErr("تعذر تحميل البيانات: " + (err && err.message ? err.message : String(err)));
-        setUsers([{ user_id:"admin", username:"admin", password:"admin123", full_name:"مدير النظام", role_name:"مدير الصيانة" }]);
+        setUsers([{ user_id:"admin", username:"admin", password:"admin123", full_name:"مدير النظام", role_name:"أدمن" }]);
       }
       setLoading(false);
     })();
@@ -647,18 +1249,60 @@ function App(){
 
   const rank = rankOf(currentUser);
   const canEdit = rank >= 1;
-  const canSeeUsers = rank === 3;
-  const isManager = rank === 3;
+  const isManager = rank >= 3;       // مدير الصيانة والأدمن يرون كل المحطات
+  const isAdmin = rank >= 4;
+  const canSeeUsers = isManager;
+  const canExportPrint = rank >= 2;
+  const mySite = String(currentUser.site_id);
 
   const siteMap = Object.fromEntries(sites.map(s => [s.site_id, s.site_name || s.name || s.site_id]));
   const siteName = (id) => siteMap[id] || id || "—";
   const sitePairs = sites.map(s => ({ value: s.site_id, label: s.site_name || s.name || s.site_id }));
 
-  const visibleEquipment = isManager ? equipment : equipment.filter(e => String(e.site_id) === String(currentUser.site_id));
-
-  const equipmentOptionPairs = equipment.map(e => ({ value: e.equipment_id, label: `${e.name||""}${e.desc ? " - "+e.desc : ""}` }));
   const equipmentSiteMap = Object.fromEntries(equipment.map(e => [e.equipment_id, e.site_id]));
-  const canExportPrint = rank >= 2;
+  const eqNameMap = Object.fromEntries(equipment.map(e => [e.equipment_id, e.name]));
+  // رمز المعدة للعرض في باقي الصفحات: بدون بادئة eq
+  const eqText = (id) => {
+    if(!id) return "—";
+    const t = stripEq(eqNameMap[id] || id);
+    return t || String(id);
+  };
+  const accMap = Object.fromEntries(accessories.map(a => [a.acc_id, a]));
+  const accText = (id) => id ? ((accMap[id] && accMap[id].name) || id) : "—";
+  const invoiceMap = Object.fromEntries(invoices.map(i => [i.invoice_id, i]));
+
+  // ---- نطاق البيانات حسب محطة المستخدم (الأدمن ومدير الصيانة يرون الكل) ----
+  const siteOfItem = (it) => {
+    const es = it.equipment_id ? equipmentSiteMap[it.equipment_id] : undefined;
+    if(es !== undefined && es !== null && es !== "") return es;
+    return it.site_id;
+  };
+  const inScope = (it) => isManager || String(siteOfItem(it)) === mySite;
+  const accInScope = (a) => isManager || String(a.site_id) === mySite;
+  const transferInScope = (t) => isManager || [t.from_site_id, t.to_site_id, equipmentSiteMap[t.equipment_id], accMap[t.accessory_id] && accMap[t.accessory_id].site_id]
+    .some(s => s !== undefined && s !== null && s !== "" && String(s) === mySite);
+  const equipmentInScope = (e) => isManager || String(e.site_id) === mySite;
+  const resolveSiteForManager = isManager ? siteOfItem : null;
+
+  const visibleEquipment = equipment.filter(equipmentInScope);
+  const selectableEquipment = visibleEquipment.filter(e => e.status !== "سكراب");
+  const scopedWO = workorders.filter(inScope);
+  const scopedPM = pmplans.filter(inScope);
+  const scopedPR = purchaserequests.filter(inScope);
+  const scopedParts = spareparts.filter(inScope);
+  const scopedAcc = accessories.filter(accInScope);
+  const scopedTransfers = transfers.filter(transferInScope);
+  const scopedReadings = readings.filter(inScope);
+
+  const equipmentOptionPairs = selectableEquipment.map(e => ({ value: e.equipment_id, label: `${stripEq(e.name || e.equipment_id)}${e.desc ? " - "+e.desc : ""}` }));
+  const accessoryOptionPairs = scopedAcc.map(a => ({ value:a.acc_id, label:`${a.name || a.acc_id}${a.serial ? " - "+a.serial : ""}` }));
+
+  const eqCol = (key, label) => ({ key: key || "equipment_id", label: label || "المعدة", render:it=>eqText(it[key || "equipment_id"]), text:it=>eqText(it[key || "equipment_id"]) });
+  const siteCol = (key, label) => ({ key, label, render:it=>siteName(it[key]), text:it=>siteName(it[key]) });
+
+  const catalog = buildCatalog(spareparts, purchaserequests, invoiceMap);
+  const catalogByName = (name) => catalog.find(c => c.key === String(name || "").trim().toLowerCase());
+  const partNameOptions = catalog.map(c => c.part_name);
 
   const onLog = async (action, section, recordId) => {
     const entry = { id: uid("log"), at: new Date().toISOString(), by: currentUser.username, by_name: currentUser.full_name, section, action, record: recordId };
@@ -667,13 +1311,54 @@ function App(){
     try{ await saveList("activitylog", next); }catch{}
   };
 
+  const startReorder = (base) => {
+    setPrPrefill({
+      part_name: base.part_name || "", part_no: base.part_no || "", quantity: base.quantity || "",
+      equipment_id: base.equipment_id || "", priority: base.priority || "عادي",
+      request_date: todayStr(), status: "مقدم", po_number: "", notes: "",
+      ...(isManager ? {} : { site_id: currentUser.site_id }),
+    });
+    setCatalogView(null);
+    setTab("pr");
+  };
+
+  const saveInvoice = async (inv, lines) => {
+    const stamp = { last_modified_by: currentUser.full_name, last_modified_at: new Date().toISOString() };
+    const invId = uid("INV");
+    const siteId = isManager ? (inv.site_id || "") : currentUser.site_id;
+    const invRecord = { invoice_id:invId, invoice_no:inv.invoice_no.trim(), supplier:inv.supplier, date:inv.date, image:inv.image, site_id:siteId, ...stamp };
+    const partRecords = lines.map(l => ({ ...l, part_name:l.part_name.trim(), part_id:uid("SP"), invoice_id:invId, received_date:inv.date, site_id:siteId, ...stamp }));
+    const nextInv = [...invoices, invRecord];
+    const nextParts = [...spareparts, ...partRecords];
+    await saveList("invoices", nextInv);
+    await saveList("spareparts", nextParts);
+    setInvoices(nextInv); setSpareparts(nextParts);
+    onLog("إضافة", "invoices", invRecord.invoice_no || invId);
+  };
+
+  // عند حفظ تحويل جديد: تنتقل المعدة/الملحق فعليًا إلى المحطة الجديدة
+  const applyTransfer = async (rec, isNew) => {
+    if(!isNew || !rec.to_site_id) return;
+    if(rec.equipment_id && equipment.some(e => e.equipment_id === rec.equipment_id)){
+      const next = equipment.map(e => e.equipment_id === rec.equipment_id ? { ...e, site_id: rec.to_site_id } : e);
+      await saveList("equipment", next); setEquipment(next);
+    }
+    if(rec.accessory_id && accessories.some(a => a.acc_id === rec.accessory_id)){
+      const next = accessories.map(a => a.acc_id === rec.accessory_id ? { ...a, site_id: rec.to_site_id } : a);
+      await saveList("accessories", next); setAccessories(next);
+    }
+  };
+
   const TABS = [
     { key:"dashboard", label:"لوحة التحكم", icon:IconDash },
     { key:"equipment", label:"المعدات", icon:IconBox },
     { key:"workorders", label:"أوامر العمل", icon:IconList },
     { key:"pm", label:"الصيانة الوقائية", icon:IconCal },
+    { key:"predictive", label:"الصيانة التنبؤية", icon:IconPredict },
     { key:"pr", label:"طلبات الشراء", icon:IconSearch },
     { key:"parts", label:"قطع الغيار", icon:IconParts },
+    { key:"catalog", label:"كتالوج القطع", icon:IconCatalog },
+    { key:"accessories", label:"الملحقات", icon:IconAcc },
     { key:"transfers", label:"النقل", icon:IconSwap },
     { key:"reports", label:"التقارير", icon:IconReport },
   ];
@@ -690,18 +1375,24 @@ function App(){
     { key:"model", label:"الموديل" },
     { key:"plate", label:"رقم اللوحة" },
     { key:"barcode", label:"الباركود" },
-    { key:"status", label:"الحالة", type:"select", options:["يعمل","متوقف","تحت الصيانة","مفتوح"] },
+    { key:"status", label:"الحالة", type:"select", options:EQUIPMENT_STATUSES },
     { key:"condition", label:"الحالة الفنية", type:"combo", options:distinctValues(equipment,"condition") },
     ...(isManager ? [{ key:"site_id", label:"الموقع", type:"select", optionPairs:sitePairs }] : []),
     { key:"purchaseYear", label:"سنة الشراء" },
   ];
+
+  // أدمن يستطيع تعيين دور أدمن؛ ومدير الصيانة فقط إذا لم يوجد أدمن بعد
+  const hasAdminUser = (users || []).some(u => u.role_name === "أدمن");
+  const roleOptions = ["فني","مسؤول صيانة","مهندس صيانة","مدير الصيانة", ...((isAdmin || !hasAdminUser) ? ["أدمن"] : [])];
+
+  const scrapCount = visibleEquipment.filter(e => e.status === "سكراب").length;
 
   return (
     <div className="app">
       <div className="topbar">
         <div><IconWrench size={20}/> نظام صيانة الورشة المركزية</div>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <span style={{ color:"var(--muted)", fontSize:13 }}>{currentUser.full_name} ({currentUser.role_name || "—"})</span>
+          <span style={{ color:"var(--muted)", fontSize:13 }}>{currentUser.full_name} ({currentUser.role_name || "—"}{!isManager ? " — " + siteName(currentUser.site_id) : ""})</span>
           <button className="btn-secondary" onClick={()=>setCurrentUser(null)}><IconLogout size={13}/> خروج</button>
         </div>
       </div>
@@ -715,22 +1406,22 @@ function App(){
       </div>
 
       {tab === "dashboard" && (
-        <Dashboard equipmentCount={visibleEquipment.length} equipment={equipment} workorders={workorders}
-          pmplans={pmplans} purchaserequests={purchaserequests} currentUser={currentUser}
-          sites={sites} siteName={siteName} />
+        <Dashboard equipmentCount={selectableEquipment.length} scrapCount={scrapCount} equipment={isManager ? equipment : visibleEquipment} workorders={scopedWO}
+          pmplans={scopedPM} purchaserequests={scopedPR} currentUser={currentUser}
+          sites={sites} siteName={siteName} onGoto={setTab} />
       )}
 
       {tab === "equipment" && (
         <SectionTable title="المعدات" storageKey="equipment" idField="equipment_id" idPrefix="eq"
-          data={visibleEquipment} setData={setEquipment} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          data={equipment} setData={setEquipment} viewFilter={equipmentInScope} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
           canExport={canExportPrint} resolveSite={isManager ? (it=>it.site_id) : null} sitePairs={sitePairs}
-          defaultsOnAdd={() => isManager ? {} : { site_id: currentUser.site_id }}
+          defaultsOnAdd={() => isManager ? { status:"يعمل" } : { site_id: currentUser.site_id, status:"يعمل" }}
           columns={[
             { key:"name", label:"الرمز" },
             { key:"desc", label:"الوصف" },
             { key:"type", label:"النوع" },
-            { key:"status", label:"الحالة" },
-            { key:"site_id", label:"الموقع", render:item=>siteName(item.site_id) },
+            { key:"status", label:"الحالة", render:item=> item.status === "سكراب" ? <span className="badge high">سكراب</span> : (item.status || "") },
+            { key:"site_id", label:"الموقع", render:item=>siteName(item.site_id), text:item=>siteName(item.site_id) },
           ]}
           fieldsDef={equipmentFieldsDef}
         />
@@ -738,8 +1429,10 @@ function App(){
 
       {tab === "workorders" && (
         <SectionTable title="أوامر العمل" storageKey="workorders" idField="wo_id" idPrefix="WO"
-          data={workorders} setData={setWorkorders} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
-          canExport={canExportPrint} dateField="opened_at" resolveSite={it=>equipmentSiteMap[it.equipment_id]} sitePairs={sitePairs}
+          data={workorders} setData={setWorkorders} viewFilter={inScope} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} dateField="opened_at" resolveSite={resolveSiteForManager} sitePairs={sitePairs}
+          defaultsOnAdd={() => isManager ? {} : { site_id: currentUser.site_id }}
+          validate={(m) => m.equipment_id ? "" : "اختر المعدة"}
           onBeforeSave={(record) => {
             if(record.status === "مكتمل" && !record.closed_at){ record.closed_at = new Date().toISOString(); }
             else if(record.status !== "مكتمل"){ delete record.closed_at; }
@@ -748,102 +1441,229 @@ function App(){
           }}
           columns={[
             { key:"wo_id", label:"الرقم" },
-            { key:"equipment_id", label:"المعدة" },
-            { key:"fault_category", label:"تصنيف العطل", render:item=>renderFaultCategory(item.fault_category) },
+            eqCol("equipment_id","المعدة"),
+            { key:"fault_category", label:"تصنيف العطل", render:item=>renderFaultCategory(item.fault_category), text:item=>faultText(item.fault_category) },
             { key:"description", label:"الوصف" },
             { key:"status", label:"الحالة" },
           ]}
           fieldsDef={[
-            { key:"equipment_id", label:"المعدة", type:"combo", optionPairs:equipmentOptionPairs },
+            { key:"equipment_id", label:"المعدة", type:"search", optionPairs:equipmentOptionPairs, fallbackLabel:eqText },
             { key:"type", label:"النوع", type:"combo", options:distinctValues(workorders,"type") },
             { key:"fault_category", label:"تصنيف العطل", type:"select", optionPairs:FAULT_CATEGORY_OPTION_PAIRS },
             { key:"description", label:"الوصف" },
             { key:"status", label:"الحالة", type:"select", options:["مفتوح","قيد التنفيذ","مكتمل","معلق"] },
-            { key:"priority", label:"الأولوية", type:"select", options:["عاجل","عالي","عادي","منخفض"] },
+            { key:"priority", label:"الأولوية", type:"select", options:PRIORITIES },
           ]}
         />
       )}
 
       {tab === "pm" && (
         <SectionTable title="خطط الصيانة الوقائية" storageKey="pmplans" idField="pm_id" idPrefix="PM"
-          data={pmplans} setData={setPmplans} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
-          canExport={canExportPrint} resolveSite={it=>equipmentSiteMap[it.equipment_id]} sitePairs={sitePairs}
+          data={pmplans} setData={setPmplans} viewFilter={inScope} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} resolveSite={resolveSiteForManager} sitePairs={sitePairs}
+          defaultsOnAdd={() => isManager ? {} : { site_id: currentUser.site_id }}
+          validate={(m) => m.equipment_id ? "" : "اختر المعدة"}
           columns={[
             { key:"pm_id", label:"الرقم" },
-            { key:"equipment_id", label:"المعدة" },
+            eqCol("equipment_id","المعدة"),
             { key:"notes", label:"ملاحظات" },
           ]}
           fieldsDef={[
-            { key:"equipment_id", label:"المعدة", type:"combo", optionPairs:equipmentOptionPairs },
+            { key:"equipment_id", label:"المعدة", type:"search", optionPairs:equipmentOptionPairs, fallbackLabel:eqText },
             { key:"notes", label:"ملاحظات" },
           ]}
         />
       )}
 
+      {tab === "predictive" && (
+        <Predictive equipment={visibleEquipment} workorders={scopedWO} readings={readings} setReadings={setReadings}
+          canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          equipmentOptionPairs={equipmentOptionPairs} eqText={eqText} inScope={inScope} />
+      )}
+
       {tab === "pr" && (
-        <SectionTable title="طلبات قطع الغيار" storageKey="purchaserequests" idField="pr_id" idPrefix="PR"
-          data={purchaserequests} setData={setPurchaserequests} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
-          canExport={canExportPrint} dateField="request_date" resolveSite={it=>equipmentSiteMap[it.equipment_id]} sitePairs={sitePairs}
+        <SectionTable title="طلبات الشراء" storageKey="purchaserequests" idField="pr_id" idPrefix="PR"
+          data={purchaserequests} setData={setPurchaserequests} viewFilter={inScope} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} dateField="request_date" resolveSite={resolveSiteForManager} sitePairs={sitePairs}
+          prefill={prPrefill} onPrefillUsed={()=>setPrPrefill(null)}
+          defaultsOnAdd={() => ({ request_date: todayStr(), status:"مقدم", priority:"عادي", ...(isManager ? {} : { site_id: currentUser.site_id }) })}
+          validate={(m) => !String(m.part_name || "").trim() ? "أدخل اسم الصنف" : (!(Number(m.quantity) > 0) ? "أدخل الكمية" : "")}
+          onBeforeSave={(record) => {
+            if(!record.request_date) record.request_date = todayStr();
+            if(!record.part_no){ const c = catalogByName(record.part_name); if(c && c.part_no) record.part_no = c.part_no; }
+            return record;
+          }}
+          extraActions={(item)=>(
+            <React.Fragment>
+              {catalogByName(item.part_name) && <button className="icon-btn" title="صفحة القطعة في الكتالوج" onClick={()=>setCatalogView(catalogByName(item.part_name))}>📚</button>}
+              {canEdit && <button className="icon-btn" title="طلب نفس القطعة مرة أخرى" onClick={()=>startReorder(item)}>إعادة طلب</button>}
+            </React.Fragment>
+          )}
           columns={[
             { key:"pr_id", label:"الرقم" },
+            { key:"po_number", label:"P.O" },
             { key:"part_name", label:"الصنف" },
             { key:"quantity", label:"الكمية" },
+            { key:"priority", label:"الأولوية", render:item=> item.priority === "عاجل" ? <span className="badge high">عاجل</span> : (item.priority || "—") },
             { key:"status", label:"الحالة" },
-            { key:"equipment_id", label:"المعدة" },
+            eqCol("equipment_id","المعدة"),
+            { key:"request_date", label:"تاريخ الطلب" },
+            { key:"expiry", label:"المتبقي من مدة الطلب (3 أشهر)",
+              render:item=>{ const l = prAlertLevel(item); const t = prExpiryText(item); return l ? <span className={`badge ${l === "expired" ? "high" : "mid"}`}>{t}</span> : t; },
+              text:item=>prExpiryText(item) },
           ]}
           fieldsDef={[
-            { key:"part_name", label:"الصنف", type:"combo", options:distinctValues(purchaserequests,"part_name") },
+            { key:"part_name", label:"الصنف", type:"combo", options:partNameOptions,
+              extra:(v)=>{ const c = catalogByName(v.part_name); return c ? (
+                <button type="button" className="link-btn" style={{ marginTop:6 }} onClick={()=>setCatalogView(c)}>📚 عرض صفحة القطعة في الكتالوج ({c.request_count} طلب سابق)</button>
+              ) : null; } },
+            { key:"part_no", label:"رقم القطعة (اختياري)" },
             { key:"quantity", label:"الكمية", type:"number" },
-            { key:"equipment_id", label:"المعدة", type:"combo", optionPairs:equipmentOptionPairs },
-            { key:"status", label:"الحالة", type:"select", options:["مقدم","تم الموافقة","تم التسليم","مكتمل"] },
+            { key:"equipment_id", label:"المعدة", type:"search", optionPairs:equipmentOptionPairs, fallbackLabel:eqText },
+            { key:"po_number", label:"رقم P.O" },
+            { key:"priority", label:"الأولوية", type:"select", options:PRIORITIES },
+            { key:"request_date", label:"تاريخ الطلب", type:"date" },
+            { key:"status", label:"الحالة", type:"select", options:PR_STATUSES },
             { key:"notes", label:"ملاحظات" },
           ]}
         />
       )}
 
       {tab === "parts" && (
-        <SectionTable title="قطع الغيار (المخزون)" storageKey="spareparts" idField="part_id" idPrefix="SP"
-          data={spareparts} setData={setSpareparts} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
-          canExport={canExportPrint} dateField="received_date" resolveSite={it=>equipmentSiteMap[it.equipment_id]} sitePairs={sitePairs}
+        <div>
+          {canEdit && (
+            <div className="card" style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
+              <span style={{ fontSize:13, color:"var(--muted)" }}>للفاتورة التي تحمل أكثر من قطعة: سجّلها مرة واحدة بكل قطعها وصورتها.</span>
+              <button className="btn" style={{ width:"auto", padding:"10px 16px" }} onClick={()=>setInvoiceOpen(true)}>🧾 إضافة فاتورة بعدة قطع</button>
+            </div>
+          )}
+          <SectionTable title="قطع الغيار (المخزون)" storageKey="spareparts" idField="part_id" idPrefix="SP"
+            data={spareparts} setData={setSpareparts} viewFilter={inScope} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+            canExport={canExportPrint} dateField="received_date" resolveSite={resolveSiteForManager} sitePairs={sitePairs}
+            addLabel="إضافة قطعة منفردة"
+            defaultsOnAdd={() => ({ received_date: todayStr(), ...(isManager ? {} : { site_id: currentUser.site_id }) })}
+            validate={(m) => !String(m.part_name || "").trim() ? "أدخل اسم القطعة" : (!(Number(m.qty) > 0) ? "أدخل العدد (أكبر من صفر)" : "")}
+            extraActions={(item)=> catalogByName(item.part_name) ? (
+              <button className="icon-btn" title="صفحة القطعة في الكتالوج" onClick={()=>setCatalogView(catalogByName(item.part_name))}>📚</button>
+            ) : null}
+            columns={[
+              { key:"part_name", label:"اسم القطعة" },
+              { key:"part_no", label:"رقم القطعة" },
+              { key:"qty", label:"العدد" },
+              { key:"price", label:"سعر الوحدة" },
+              { key:"brand", label:"الماركة" },
+              { key:"country", label:"بلد الصنع" },
+              eqCol("equipment_id","المعدة"),
+              { key:"invoice_id", label:"الفاتورة",
+                render:item=>{
+                  const inv = invoiceMap[item.invoice_id];
+                  const img = item.invoice_image || (inv && inv.image);
+                  const no = inv ? (inv.invoice_no || inv.invoice_id) : "";
+                  if(!no && !img) return "—";
+                  return (<span>{no} {img ? <button className="link-btn" onClick={()=>setViewImage(img)}>عرض</button> : null}</span>);
+                },
+                text:item=>{ const inv = invoiceMap[item.invoice_id]; return inv ? (inv.invoice_no || inv.invoice_id) : ""; } },
+            ]}
+            fieldsDef={[
+              { key:"part_name", label:"اسم القطعة", type:"combo", options:partNameOptions },
+              { key:"part_no", label:"رقم القطعة" },
+              { key:"qty", label:"العدد", type:"number" },
+              { key:"price", label:"سعر الوحدة", type:"number" },
+              { key:"brand", label:"الماركة", type:"combo", options:distinctValues(spareparts,"brand") },
+              { key:"country", label:"بلد الصنع", type:"combo", options:distinctValues(spareparts,"country") },
+              { key:"equipment_id", label:"المعدة المرتبطة", type:"search", optionPairs:equipmentOptionPairs, fallbackLabel:eqText },
+              { key:"invoice_id", label:"الفاتورة", type:"select", optionPairs:invoices.filter(i => isManager || String(i.site_id) === mySite).map(i => ({ value:i.invoice_id, label:`${i.invoice_no || i.invoice_id} — ${i.date || ""}` })) },
+              { key:"received_date", label:"تاريخ الاستلام", type:"date" },
+              { key:"notes", label:"ملاحظات" },
+              { key:"invoice_image", label:"صورة فاتورة (للقطع القديمة فقط)", type:"file" },
+            ]}
+          />
+        </div>
+      )}
+
+      {tab === "catalog" && (
+        <GenericTable title="كتالوج القطع" items={catalog} idField="key" canEdit={false}
+          canExport={canExportPrint}
+          extraActions={(item)=>(
+            <React.Fragment>
+              <button className="icon-btn" onClick={()=>setCatalogView(item)}>عرض الصفحة</button>
+              {canEdit && <button className="icon-btn" onClick={()=>startReorder(item)}>طلب</button>}
+            </React.Fragment>
+          )}
           columns={[
             { key:"part_name", label:"اسم القطعة" },
-            { key:"price", label:"السعر" },
+            { key:"part_no", label:"رقم القطعة" },
             { key:"brand", label:"الماركة" },
             { key:"country", label:"بلد الصنع" },
-            { key:"equipment_id", label:"المعدة" },
-            { key:"invoice_image", label:"الفاتورة", render:item=> item.invoice_image ? <a href={item.invoice_image} target="_blank" rel="noreferrer">عرض</a> : "—" },
+            { key:"request_count", label:"عدد الطلبات" },
+            { key:"total_qty", label:"إجمالي المشتريات" },
+            { key:"last_price", label:"آخر سعر" },
+          ]}
+        />
+      )}
+
+      {tab === "accessories" && (
+        <SectionTable title="الملحقات والقطع المتنقلة" storageKey="accessories" idField="acc_id" idPrefix="ACC"
+          data={accessories} setData={setAccessories} viewFilter={accInScope} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} resolveSite={isManager ? (it=>it.site_id) : null} sitePairs={sitePairs}
+          defaultsOnAdd={() => isManager ? { status:"يعمل" } : { site_id: currentUser.site_id, status:"يعمل" }}
+          validate={(m) => String(m.name || "").trim() ? "" : "أدخل اسم الملحق"}
+          columns={[
+            { key:"name", label:"الملحق" },
+            { key:"serial", label:"الرقم التسلسلي" },
+            eqCol("equipment_id","المعدة المرتبطة"),
+            siteCol("site_id","المحطة الحالية"),
+            { key:"status", label:"الحالة" },
           ]}
           fieldsDef={[
-            { key:"part_name", label:"اسم القطعة", type:"combo", options:distinctValues(spareparts,"part_name") },
-            { key:"price", label:"السعر", type:"number" },
-            { key:"brand", label:"الماركة", type:"combo", options:distinctValues(spareparts,"brand") },
-            { key:"country", label:"بلد الصنع", type:"combo", options:distinctValues(spareparts,"country") },
-            { key:"equipment_id", label:"المعدة المرتبطة", type:"combo", optionPairs:equipmentOptionPairs },
-            { key:"received_date", label:"تاريخ الاستلام", type:"date" },
+            { key:"name", label:"اسم الملحق", type:"combo", options:Array.from(new Set(["ريموت تحكم","رسيفر","شاحن","بطارية", ...distinctValues(accessories,"name")])) },
+            { key:"serial", label:"الرقم التسلسلي / الكود" },
+            { key:"equipment_id", label:"المعدة المرتبطة (اختياري)", type:"search", optionPairs:equipmentOptionPairs, fallbackLabel:eqText },
+            ...(isManager ? [{ key:"site_id", label:"المحطة الحالية", type:"select", optionPairs:sitePairs }] : []),
+            { key:"status", label:"الحالة", type:"select", options:["يعمل","تالف","مفقود","في الصيانة"] },
             { key:"notes", label:"ملاحظات" },
-            { key:"invoice_image", label:"صورة الفاتورة", type:"file" },
           ]}
         />
       )}
 
       {tab === "transfers" && (
-        <SectionTable title="حركة النقل بين المواقع" storageKey="transfers" idField="transfer_id" idPrefix="TR"
-          data={transfers} setData={setTransfers} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
-          canExport={canExportPrint} resolveSite={it=>it.to_site_id} sitePairs={sitePairs}
+        <SectionTable title="حركة النقل بين المحطات" storageKey="transfers" idField="transfer_id" idPrefix="TR"
+          data={transfers} setData={setTransfers} viewFilter={transferInScope} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
+          canExport={canExportPrint} dateField="transfer_date" resolveSite={isManager ? (it=>it.to_site_id) : null} sitePairs={sitePairs}
+          defaultsOnAdd={() => ({ transfer_date: todayStr(), ...(isManager ? {} : { from_site_id: currentUser.site_id }) })}
+          validate={(m) => (!m.equipment_id && !m.accessory_id) ? "اختر معدة أو ملحقًا للنقل" : (!m.to_site_id ? "اختر المحطة المحول إليها" : "")}
+          onBeforeSave={(rec) => {
+            if(!rec.from_site_id){
+              const a = rec.accessory_id && accMap[rec.accessory_id];
+              const s = (a && a.site_id) || equipmentSiteMap[rec.equipment_id] || "";
+              if(s) rec.from_site_id = s;
+            }
+            if(!rec.transfer_date) rec.transfer_date = todayStr();
+            return rec;
+          }}
+          onAfterSave={applyTransfer}
           columns={[
-            { key:"equipment_id", label:"المعدة" },
-            { key:"to_site_id", label:"إلى موقع", render:item=>siteName(item.to_site_id) },
+            eqCol("equipment_id","المعدة"),
+            { key:"accessory_id", label:"الملحق", render:item=>accText(item.accessory_id), text:item=>item.accessory_id ? accText(item.accessory_id) : "" },
+            siteCol("from_site_id","من محطة"),
+            siteCol("to_site_id","إلى محطة"),
+            { key:"transfer_date", label:"التاريخ" },
             { key:"reason", label:"السبب" },
           ]}
           fieldsDef={[
-            { key:"equipment_id", label:"المعدة", type:"combo", optionPairs:equipmentOptionPairs },
-            { key:"to_site_id", label:"إلى موقع", type:"select", optionPairs:sitePairs },
+            { key:"equipment_id", label:"المعدة (اختياري إذا كان النقل لملحق)", type:"search", optionPairs:equipmentOptionPairs, fallbackLabel:eqText },
+            { key:"accessory_id", label:"الملحق (اختياري)", type:"search", optionPairs:accessoryOptionPairs, fallbackLabel:accText },
+            { key:"from_site_id", label:"المحطة المحول منها", type:"select", optionPairs:sitePairs },
+            { key:"to_site_id", label:"المحطة المحول إليها", type:"select", optionPairs:sitePairs },
+            { key:"transfer_date", label:"تاريخ التحويل", type:"date" },
             { key:"reason", label:"السبب" },
           ]}
         />
       )}
 
-      {tab === "reports" && <Reports equipment={equipment} workorders={workorders} pmplans={pmplans} purchaserequests={purchaserequests} transfers={transfers} users={users} spareparts={spareparts} canExportPrint={canExportPrint} />}
+      {tab === "reports" && <Reports equipment={visibleEquipment} workorders={scopedWO} pmplans={scopedPM} purchaserequests={scopedPR}
+        transfers={scopedTransfers} users={users} spareparts={scopedParts} accessories={scopedAcc} readings={scopedReadings}
+        invoices={invoices} sites={sites} canExportPrint={canExportPrint} isManager={isManager} eqText={eqText} siteName={siteName} />}
 
       {tab === "sites" && canSeeUsers && (
         <SectionTable title="المحطات" storageKey="sites" idField="site_id" idPrefix="site"
@@ -861,19 +1681,19 @@ function App(){
 
       {tab === "users" && canSeeUsers && (
         <SectionTable title="المستخدمون" storageKey="users" idField="user_id" idPrefix="user"
-          data={users} setData={setUsers} canEdit={true} currentUser={currentUser} onLog={onLog}
+          data={users} setData={setUsers} viewFilter={(u)=> isAdmin || rankOf(u) < 4} canEdit={true} currentUser={currentUser} onLog={onLog}
           canExport={canExportPrint} resolveSite={it=>it.site_id} sitePairs={sitePairs}
           columns={[
             { key:"username", label:"اسم المستخدم" },
             { key:"full_name", label:"الاسم الكامل" },
             { key:"role_name", label:"الصلاحية" },
-            { key:"site_id", label:"الموقع", render:item=>siteName(item.site_id) },
+            siteCol("site_id","الموقع"),
           ]}
           fieldsDef={[
             { key:"username", label:"اسم المستخدم" },
             { key:"password", label:"كلمة المرور" },
             { key:"full_name", label:"الاسم الكامل" },
-            { key:"role_name", label:"الصلاحية", type:"select", options:["فني","مسؤول صيانة","مهندس صيانة","مدير الصيانة"] },
+            { key:"role_name", label:"الصلاحية", type:"select", options:roleOptions },
             { key:"site_id", label:"الموقع", type:"select", optionPairs:sitePairs },
           ]}
         />
@@ -882,13 +1702,34 @@ function App(){
       {tab === "log" && canSeeUsers && (
         <GenericTable title="سجل النشاط" items={activitylog} idField="id" canEdit={false}
           columns={[
-            { key:"at", label:"التاريخ", render:item=> new Date(item.at).toLocaleString("en-US") },
+            { key:"at", label:"التاريخ", render:item=> new Date(item.at).toLocaleString("en-US"), text:item=> new Date(item.at).toLocaleString("en-US") },
             { key:"by_name", label:"المستخدم" },
-            { key:"section", label:"القسم", render:item=> SECTION_LABELS[item.section] || item.section },
+            { key:"section", label:"القسم", render:item=> SECTION_LABELS[item.section] || item.section, text:item=> SECTION_LABELS[item.section] || item.section },
             { key:"action", label:"الإجراء" },
             { key:"record", label:"الرقم" },
           ]}
         />
+      )}
+
+      {invoiceOpen && (
+        <InvoiceModal onClose={()=>setInvoiceOpen(false)} onSave={saveInvoice}
+          equipmentOptionPairs={equipmentOptionPairs} eqText={eqText}
+          partNames={partNameOptions} brands={distinctValues(spareparts,"brand")} countries={distinctValues(spareparts,"country")}
+          sitePairs={sitePairs} showSite={isManager} defaultSite={isManager ? "" : currentUser.site_id} />
+      )}
+
+      {viewImage && (
+        <div className="modal-bg" onClick={()=>setViewImage(null)}>
+          <div className="modal wide" onClick={e=>e.stopPropagation()} style={{ textAlign:"center" }}>
+            <div className="topbar"><h3>صورة الفاتورة</h3><button className="icon-btn" onClick={()=>setViewImage(null)}><IconX size={14}/></button></div>
+            <img src={viewImage} style={{ maxWidth:"100%", borderRadius:6 }} />
+          </div>
+        </div>
+      )}
+
+      {catalogView && (
+        <CatalogModal part={catalogView} onClose={()=>setCatalogView(null)} onReorder={startReorder}
+          canEdit={canEdit} eqText={eqText} invoiceMap={invoiceMap} />
       )}
     </div>
   );
