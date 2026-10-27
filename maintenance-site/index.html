@@ -547,6 +547,118 @@ function ImportPanel(){
   );
 }
 
+// ---- دمج معدات من ملف: يضيف الناقص فقط ولا يغيّر أي قيمة موجودة (يملأ الفراغ ويصلح الحروف التالفة فقط) ----
+function MergeEquipmentPanel({ equipment, sites, setEquipment, setSites, onLog }){
+  const [open,setOpen] = useState(false);
+  const [plan,setPlan] = useState(null);
+  const [status,setStatus] = useState("");
+  const [busy,setBusy] = useState(false);
+  const nk = (v) => stripEq(String(v ?? "")).replace(/^022-/,"").trim().toUpperCase();
+  const bad = (v) => typeof v === "string" && v.indexOf("�") !== -1;
+  const empty = (v) => v === undefined || v === null || v === "";
+
+  const buildPlan = (data) => {
+    const siteList = sites.map(x => ({ ...x }));
+    const siteName = (x) => String(x.site_name || x.name || "").trim();
+    const siteIdFor = {};
+    const newSites = [];
+    for(const sp of (data.sites || [])){
+      const names = [sp.site_name, ...(sp.aliases || [])].map(x => String(x).trim().toLowerCase());
+      let found = sp.site_id ? siteList.find(x => String(x.site_id) === String(sp.site_id)) : null;
+      if(!found) found = siteList.find(x => names.includes(siteName(x).toLowerCase()));
+      if(found){ siteIdFor[sp.site_name] = found.site_id; }
+      else {
+        const rec = { site_id: sp.site_id || uid("site"), site_name: sp.site_name };
+        siteList.push(rec); newSites.push(rec); siteIdFor[sp.site_name] = rec.site_id;
+      }
+    }
+    const byName = {};
+    equipment.forEach((e,i) => { byName[nk(e.name || e.equipment_id)] = i; });
+    const next = equipment.map(e => ({ ...e }));
+    const added = []; let filled = 0, fixed = 0, touched = 0;
+    const stamp = { last_modified_by: "استيراد الأصول", last_modified_at: new Date().toISOString() };
+    for(const r of (data.equipment || [])){
+      const key = nk(r.name);
+      if(!key) continue;
+      const idx = byName[key];
+      if(idx === undefined){
+        const rec = { ...r, site_id: siteIdFor[r.site_name] || "", ...stamp };
+        delete rec.site_name;
+        next.push(rec); byName[key] = next.length - 1; added.push(rec);
+      } else {
+        const cur = next[idx]; let changed = false;
+        for(const f of ["desc","type","model","plate","purchaseYear","purchaseValue","asset_no","barcode"]){
+          if(empty(cur[f]) && !empty(r[f])){ cur[f] = r[f]; filled++; changed = true; }
+          else if(bad(cur[f]) && !empty(r[f])){ cur[f] = r[f]; fixed++; changed = true; }
+        }
+        // حذف البادئة 022- من الرمز المعروض (المعرّف الداخلي equipment_id لا يتغير حتى لا تنكسر الروابط)
+        for(const f of ["name","barcode"]){
+          if(typeof cur[f] === "string" && /^\s*022-/.test(cur[f])){ cur[f] = cur[f].replace(/^\s*022-/,""); fixed++; changed = true; }
+        }
+        if(bad(cur.status)){ cur.status = "يعمل"; fixed++; changed = true; }
+        if(bad(cur.condition)){ cur.condition = "غير محدد"; fixed++; changed = true; }
+        if(bad(cur.last_modified_by)){ cur.last_modified_by = "حمزة السفياني"; fixed++; changed = true; }
+        if(changed) touched++;
+      }
+    }
+    const perSite = {};
+    added.forEach(a => { const n = (siteList.find(x => String(x.site_id) === String(a.site_id)) || {}).site_name || "؟"; perSite[n] = (perSite[n] || 0) + 1; });
+    return { next, siteList, newSites, added, filled, fixed, touched, perSite, total: next.length };
+  };
+
+  const onFile = async (e) => {
+    setStatus(""); setPlan(null);
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    try{
+      const data = JSON.parse(await f.text());
+      if(!Array.isArray(data.equipment)) throw new Error("الملف لا يحتوي قائمة معدات");
+      setPlan(buildPlan(data));
+    }catch(err){ setStatus("تعذر قراءة الملف: " + (err && err.message ? err.message : err)); }
+  };
+
+  const apply = async () => {
+    if(!plan) return;
+    setBusy(true); setStatus("");
+    try{
+      if(plan.newSites.length){ await saveList("sites", plan.siteList); setSites(plan.siteList); }
+      await saveList("equipment", plan.next); setEquipment(plan.next);
+      onLog("دمج معدات", "equipment", `+${plan.added.length}`);
+      setStatus(`تم الدمج ✓ أُضيفت ${plan.added.length} معدة وأصبح الإجمالي ${plan.total}.`);
+      setPlan(null);
+    }catch(err){ setStatus("لم يتم الدمج: " + (err && err.message ? err.message : err)); }
+    setBusy(false);
+  };
+
+  if(!open) return (
+    <div style={{ marginBottom:10 }}>
+      <button type="button" className="icon-btn" onClick={()=>setOpen(true)}>📥 دمج معدات من ملف (إضافة الناقص فقط)</button>
+    </div>
+  );
+  return (
+    <div className="card" style={{ marginBottom:10 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <h3 style={{ margin:0 }}>📥 دمج المعدات من الملف</h3>
+        <button className="icon-btn" onClick={()=>{ setOpen(false); setPlan(null); }}><IconX size={14}/></button>
+      </div>
+      <p style={{ fontSize:13, color:"var(--muted)" }}>اختر ملف الدمج (equipment-merge.json). يعرض النظام ملخصًا أولًا ولا يحفظ شيئًا حتى تضغط "تنفيذ الدمج". المعدات الموجودة لا تتغير قيمها، ويُملأ فقط الفارغ ويُصلح التالف.</p>
+      <input type="file" accept=".json,application/json" onChange={onFile} />
+      {plan && (
+        <div style={{ marginTop:10 }}>
+          <div><span className="stat"><b>{plan.added.length}</b>معدة جديدة</span>
+            <span className="stat"><b>{plan.touched}</b>معدة موجودة سيُكمَّل نقصها ({plan.filled} حقل فارغ، {plan.fixed} تالف)</span>
+            <span className="stat"><b>{plan.newSites.length}</b>محطة جديدة</span>
+            <span className="stat"><b>{plan.total}</b>الإجمالي بعد الدمج</span></div>
+          {plan.newSites.length > 0 && <p style={{ fontSize:13 }}>محطات ستُضاف: {plan.newSites.map(x => x.site_name).join("، ")}</p>}
+          <p style={{ fontSize:13 }}>توزيع الجديد: {Object.entries(plan.perSite).map(([k,v]) => `${k} (${v})`).join("، ")}</p>
+          <button type="button" className="btn" style={{ width:"auto", padding:"10px 16px" }} disabled={busy} onClick={apply}>{busy ? "جارٍ الحفظ..." : "تنفيذ الدمج"}</button>
+        </div>
+      )}
+      {status && <p className={status.startsWith("تم") ? "ok-msg" : "error"}>{status}</p>}
+    </div>
+  );
+}
+
 function LoadBanner({ text }){
   if(!text) return null;
   return (
@@ -1492,13 +1604,16 @@ function App(){
   const partNameOptions = catalog.map(c => c.part_name);
 
   // ---- أعمدة التصدير الكاملة (تشمل الحالة الفنية للمعدة) ----
-  const eqDesc = (id) => (equipmentById[id] && equipmentById[id].desc) || "";
-  const eqCond = (id) => (equipmentById[id] && equipmentById[id].condition) || "";
-  const eqStat = (id) => (equipmentById[id] && equipmentById[id].status) || "";
-  const eqSiteTxt = (id) => equipmentById[id] ? siteName(equipmentById[id].site_id) : "";
+  // مطابقة بالمعرّف، وإن لم يوجد فبالرمز (مع تجاهل بادئة eq والحالة) حتى لا تبقى الأعمدة فارغة
+  const equipmentByName = Object.fromEntries(equipment.map(e => [stripEq(e.name || e.equipment_id).toLowerCase(), e]));
+  const eqRec = (id) => equipmentById[id] || equipmentByName[stripEq(String(id || "")).toLowerCase()] || null;
+  const eqDesc = (id) => (eqRec(id) && eqRec(id).desc) || "";
+  const eqCond = (id) => (eqRec(id) && eqRec(id).condition) || "";
+  const eqStat = (id) => (eqRec(id) && eqRec(id).status) || "";
+  const eqSiteTxt = (id) => eqRec(id) ? siteName(eqRec(id).site_id) : "";
   const expEq = (key) => [
     { key:"_c1", label:"رمز المعدة", text:it=>it[key] ? eqText(it[key]) : "" },
-    { key:"_c2", label:"وصف المعدة", text:it=>eqDesc(it[key]) },
+    { key:"_c2", label:"وصف المعدة", text:it=>it[key] && !eqRec(it[key]) ? "(معدة غير موجودة في قائمة المعدات)" : eqDesc(it[key]) },
     { key:"_c3", label:"الحالة التشغيلية للمعدة", text:it=>eqStat(it[key]) },
     { key:"_c4", label:"الحالة الفنية للمعدة", text:it=>eqCond(it[key]) },
     { key:"_c5", label:"محطة المعدة", text:it=>eqSiteTxt(it[key]) },
@@ -1521,7 +1636,7 @@ function App(){
     equipment: [
       T("name","رمز المعدة"), T("desc","الوصف"), T("type","النوع"), T("model","الموديل"), T("plate","رقم اللوحة"),
       T("barcode","الباركود"), T("status","الحالة التشغيلية"), T("condition","الحالة الفنية"),
-      { key:"_s", label:"المحطة", text:it=>siteName(it.site_id) }, T("purchaseYear","سنة الشراء"), ...lastMod,
+      { key:"_s", label:"المحطة", text:it=>siteName(it.site_id) }, T("purchaseYear","سنة الشراء"), { key:"_pv", label:"قيمة الشراء", text:it=>it.purchaseValue === undefined || it.purchaseValue === null ? "" : money(it.purchaseValue) }, T("asset_no","رقم الأصل"), ...lastMod,
     ],
     workorders: [
       T("wo_id","رقم الأمر"), ...expEq("equipment_id"),
@@ -1728,6 +1843,7 @@ function App(){
     { key:"condition", label:"الحالة الفنية", type:"combo", options:distinctValues(equipment,"condition") },
     ...(isManager ? [{ key:"site_id", label:"الموقع", type:"select", optionPairs:sitePairs }] : []),
     { key:"purchaseYear", label:"سنة الشراء" },
+    { key:"purchaseValue", label:"قيمة الشراء", type:"number" },
   ];
 
   // أدمن يستطيع تعيين دور أدمن؛ ومدير الصيانة فقط إذا لم يوجد أدمن بعد
@@ -1763,6 +1879,8 @@ function App(){
       )}
 
       {tab === "equipment" && (
+        <div>
+        {isManager && <MergeEquipmentPanel equipment={equipment} sites={sites} setEquipment={setEquipment} setSites={setSites} onLog={onLog} />}
         <SectionTable title="المعدات" storageKey="equipment" idField="equipment_id" idPrefix="eq"
           data={equipment} setData={setEquipment} viewFilter={equipmentInScope} canEdit={canEdit} currentUser={currentUser} onLog={onLog}
           canExport={canExportPrint} exportColumns={exportSets.equipment} resolveSite={isManager ? (it=>it.site_id) : null} sitePairs={sitePairs}
@@ -1779,6 +1897,7 @@ function App(){
           ]}
           fieldsDef={equipmentFieldsDef}
         />
+        </div>
       )}
 
       {tab === "workorders" && (
