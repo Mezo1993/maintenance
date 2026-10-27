@@ -1,5 +1,6 @@
 const https = require("https");
 
+// DATA_JS_VERSION: 3 (Buffer.concat UTF-8)
 const SUPABASE_HOST = "ccypshhswmzsyevprzyt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_sh84TNwey2Wvwbbs_6ZkBQ_PoSdwFw9";
 
@@ -65,6 +66,7 @@ exports.handler = async (event) => {
         body: JSON.stringify({
           value: rows[0] ? rows[0].value : [],
           updated_at: rows[0] ? rows[0].updated_at : null,
+          fn_version: 3,
         }),
       };
     }
